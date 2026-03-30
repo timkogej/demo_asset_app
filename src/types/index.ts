@@ -72,4 +72,21 @@ export interface Payment {
   created_at: string;
 }
 
+export interface VehicleFile {
+  id: string;
+  vehicle_id: string;
+  file_name: string;
+  file_path: string;
+  file_url: string;
+  file_size: number;
+  file_type: string;
+  category: string;
+  uploaded_at: string;
+  vehicle?: {
+    plate: string;
+    make: string;
+    model: string;
+  };
+}
+
 export type Language = 'it' | 'sl';

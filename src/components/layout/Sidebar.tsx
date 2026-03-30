@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   CreditCard,
   BarChart2,
+  FolderOpen,
   ChevronLeft,
   ChevronRight,
   X,
@@ -29,6 +30,7 @@ const navItems = [
   { path: '/penalties', label: 'nav.penalties', icon: AlertTriangle, end: false },
   { path: '/payments', label: 'nav.payments', icon: CreditCard, end: false },
   { path: '/analytics', label: 'nav.analytics', icon: BarChart2, end: false },
+  { path: '/documents', label: 'nav.documents', icon: FolderOpen, end: false },
 ];
 
 export default function Sidebar({

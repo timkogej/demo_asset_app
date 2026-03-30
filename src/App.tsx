@@ -7,6 +7,7 @@ import Clients from './pages/Clients';
 import Penalties from './pages/Penalties';
 import Payments from './pages/Payments';
 import Analytics from './pages/Analytics';
+import Documents from './pages/Documents';
 import { useTranslation } from './i18n/useTranslation';
 
 function App() {
@@ -52,6 +53,7 @@ function App() {
           <Route path="penalties" element={<Penalties t={t} language={language} />} />
           <Route path="payments" element={<Payments t={t} language={language} />} />
           <Route path="analytics" element={<Analytics t={t} language={language} />} />
+          <Route path="documents" element={<Documents t={t} language={language} />} />
         </Route>
       </Routes>
     </BrowserRouter>
