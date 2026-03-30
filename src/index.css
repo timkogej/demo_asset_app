@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: #f8faf8;
+  --color-surface: #ffffff;
+  --color-primary: #1a4731;
+  --color-primary-hover: #22603f;
+  --color-accent: #4a9668;
+  --color-accent-soft: #d4ead9;
+  --color-accent-muted: #a8d4b3;
+  --color-text-dark: #1c2b22;
+  --color-text-muted: #6b8f75;
+  --color-danger: #c0392b;
+  --color-warning: #d4a017;
+  --color-success: #2d7a4f;
+  --sidebar-width: 240px;
+}
+
+@layer base {
+  html {
+    font-family: 'DM Sans', sans-serif;
+    background-color: var(--color-bg);
+    color: var(--color-text-dark);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--color-bg);
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'DM Sans', sans-serif;
+    color: var(--color-text-dark);
+  }
+
+  input, select, textarea {
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  button {
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  #root {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    text-align: left;
+    border: none;
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-white px-4 py-2 rounded-10 font-medium text-sm hover:bg-primary-hover transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-surface text-primary border border-accent-muted px-4 py-2 rounded-10 font-medium text-sm hover:bg-accent-soft transition-colors duration-150;
+  }
+
+  .btn-danger {
+    @apply bg-danger text-white px-4 py-2 rounded-10 font-medium text-sm hover:opacity-90 transition-opacity duration-150;
+  }
+
+  .card {
+    @apply bg-surface border border-accent-muted rounded-10 shadow-sm;
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 border border-accent-muted rounded-10 text-sm text-text-dark bg-surface focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent placeholder-text-muted transition-colors duration-150;
+  }
+
+  .table-header {
+    @apply text-xs font-semibold text-text-muted uppercase tracking-wider px-4 py-3 text-left bg-bg;
+  }
+
+  .table-cell {
+    @apply px-4 py-3 text-sm text-text-dark;
+  }
+
+  .table-row {
+    @apply border-b border-accent-soft hover:bg-accent-soft/30 transition-colors duration-100;
+  }
+
+  .page-title {
+    @apply text-2xl font-bold text-text-dark;
+  }
+
+  .section-title {
+    @apply text-lg font-semibold text-text-dark;
+  }
+
+  .label {
+    @apply block text-xs font-medium text-text-muted mb-1;
+  }
+
+  .error-text {
+    @apply text-xs text-danger mt-1;
+  }
+
+  .spinner {
+    @apply w-5 h-5 border-2 border-accent-muted border-t-primary rounded-full animate-spin;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-accent-muted);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-slideIn {
+  animation: slideIn 0.15s ease-out;
+}
