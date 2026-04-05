@@ -134,7 +134,7 @@ export default function Analytics({ t }: AnalyticsProps) {
     const key = inv.client_id;
     if (!clientMap[key]) {
       clientMap[key] = {
-        name: inv.client.name,
+        name: inv.client.company_name,
         invoiced: 0,
         collected: 0,
       };
