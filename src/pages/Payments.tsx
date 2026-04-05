@@ -233,7 +233,7 @@ export default function Payments({ t }: PaymentsProps) {
                     <td className="table-cell font-mono text-xs font-semibold text-primary">
                       {invoice.invoice_number}
                     </td>
-                    <td className="table-cell">{invoice.client?.name || '—'}</td>
+                    <td className="table-cell">{invoice.client?.company_name || '—'}</td>
                     <td className="table-cell font-mono text-xs">
                       {invoice.vehicle?.plate || '—'}
                     </td>

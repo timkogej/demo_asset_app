@@ -192,7 +192,7 @@ export default function Penalties({ t }: PenaltiesProps) {
                       <td className="table-cell font-mono font-semibold text-primary">
                         {penalty.vehicle?.plate || '—'}
                       </td>
-                      <td className="table-cell">{penalty.client?.name || '—'}</td>
+                      <td className="table-cell">{penalty.client?.company_name || '—'}</td>
                       <td className="table-cell font-semibold text-danger">
                         {formatCurrency(penalty.amount)}
                       </td>
@@ -250,7 +250,7 @@ export default function Penalties({ t }: PenaltiesProps) {
               {vehicles.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.plate} — {v.make} {v.model}
-                  {v.client ? ` (${v.client.name})` : ''}
+                  {v.client ? ` (${v.client.company_name})` : ''}
                 </option>
               ))}
             </select>
@@ -261,7 +261,7 @@ export default function Penalties({ t }: PenaltiesProps) {
           {getSelectedVehicle()?.client && (
             <div className="bg-accent-soft/50 rounded-10 px-3 py-2 text-xs text-text-muted">
               <span className="font-medium text-text-dark">
-                {getSelectedVehicle()?.client?.name}
+                {getSelectedVehicle()?.client?.company_name}
               </span>
               {' — '}
               {getSelectedVehicle()?.client?.email}

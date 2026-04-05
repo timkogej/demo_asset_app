@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Car, Users, FileText, DollarSign, RefreshCw } from 'lucide-react';
+import { Car, Users, FileText, DollarSign, RefreshCw, AlertCircle, Clock, TrendingUp, TrendingDown } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
@@ -14,7 +14,8 @@ interface DashboardProps {
   language: Language;
 }
 
-function formatCurrency(amount: number): string {
+function formatCurrency(amount: number | null | undefined): string {
+  if (amount === null || amount === undefined) return '—';
   return `€${amount.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
@@ -25,6 +26,80 @@ function formatDate(dateStr?: string | null): string {
   } catch {
     return '—';
   }
+}
+
+function getExpiryStatus(dateStr: string | null): 'expired' | 'warning' | 'ok' | 'none' {
+  if (!dateStr) return 'none';
+  const date = new Date(dateStr);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+  const days = Math.floor((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (days < 0) return 'expired';
+  if (days <= 30) return 'warning';
+  return 'ok';
+}
+
+function ExpiryCell({ dateStr }: { dateStr: string | null }) {
+  const status = getExpiryStatus(dateStr);
+  if (status === 'none') return <span className="text-text-muted">—</span>;
+  const text = formatDate(dateStr);
+  if (status === 'expired') {
+    return (
+      <span className="flex items-center gap-1 text-danger text-xs font-medium">
+        <AlertCircle size={12} strokeWidth={1.8} />
+        {text}
+      </span>
+    );
+  }
+  if (status === 'warning') {
+    return (
+      <span className="flex items-center gap-1 text-amber-600 text-xs font-medium">
+        <Clock size={12} strokeWidth={1.8} />
+        {text}
+      </span>
+    );
+  }
+  return <span className="text-xs">{text}</span>;
+}
+
+function OwnershipBadge({ status, t }: { status: 'LEASING' | "PROPRIETA'"; t: (k: string) => string }) {
+  if (status === 'LEASING') {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-accent-soft text-primary">
+        {t('veh.leasing')}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+      style={{ backgroundColor: '#dbeafe', color: '#1d4ed8' }}
+    >
+      {t('veh.proprieta')}
+    </span>
+  );
+}
+
+function ProfitCell({ value }: { value: number | null | undefined }) {
+  if (value === null || value === undefined) return <span className="text-text-muted text-xs">—</span>;
+  if (value > 0) {
+    return (
+      <span className="flex items-center gap-1 text-success text-xs font-medium">
+        <TrendingUp size={12} strokeWidth={1.8} />
+        {formatCurrency(value)}
+      </span>
+    );
+  }
+  if (value < 0) {
+    return (
+      <span className="flex items-center gap-1 text-danger text-xs font-medium">
+        <TrendingDown size={12} strokeWidth={1.8} />
+        {formatCurrency(value)}
+      </span>
+    );
+  }
+  return <span className="text-text-muted text-xs">€0.00</span>;
 }
 
 export default function Dashboard({ t }: DashboardProps) {
@@ -40,7 +115,7 @@ export default function Dashboard({ t }: DashboardProps) {
       const [vehiclesRes, invoicesRes] = await Promise.all([
         supabase
           .from('vehicles')
-          .select('*, client:clients(*)')
+          .select(`*, client:clients(id, company_name, email, country)`)
           .order('created_at', { ascending: false }),
         supabase
           .from('invoices')
@@ -268,9 +343,10 @@ export default function Dashboard({ t }: DashboardProps) {
                   <th className="table-header">{t('vehicles.plate')}</th>
                   <th className="table-header">{t('vehicles.make')}/{t('vehicles.model')}</th>
                   <th className="table-header">{t('vehicles.client')}</th>
+                  <th className="table-header">{t('veh.ownership_status')}</th>
                   <th className="table-header">{t('vehicles.monthly_rate')}</th>
-                  <th className="table-header">{t('vehicles.current_km')}</th>
-                  <th className="table-header">{t('vehicles.lease_end')}</th>
+                  <th className="table-header">{t('veh.profit_difference')}</th>
+                  <th className="table-header">{t('veh.registration_expiry')}</th>
                   <th className="table-header">{t('vehicles.status')}</th>
                 </tr>
               </thead>
@@ -285,36 +361,33 @@ export default function Dashboard({ t }: DashboardProps) {
                       {vehicle.plate}
                     </td>
                     <td className="table-cell">
-                      {vehicle.make} {vehicle.model}
+                      <span className="font-medium">{vehicle.make}</span>
+                      <span className="text-text-muted ml-1">{vehicle.model}</span>
                       {vehicle.year && (
                         <span className="text-text-muted ml-1 text-xs">({vehicle.year})</span>
                       )}
                     </td>
                     <td className="table-cell">
                       {vehicle.client ? (
-                        <span>{vehicle.client.name}</span>
+                        <span>{vehicle.client.company_name}</span>
                       ) : (
                         <span className="text-text-muted">—</span>
                       )}
                     </td>
+                    <td className="table-cell">
+                      <OwnershipBadge status={vehicle.ownership_status} t={t} />
+                    </td>
                     <td className="table-cell font-medium">
                       {formatCurrency(vehicle.monthly_rate)}
                     </td>
-                    <td className="table-cell text-text-muted">
-                      {vehicle.current_km.toLocaleString('it-IT')} km
-                    </td>
-                    <td className="table-cell text-text-muted">
-                      {formatDate(vehicle.lease_end_date)}
+                    <td className="table-cell">
+                      <ProfitCell value={vehicle.profit_difference} />
                     </td>
                     <td className="table-cell">
-                      <Badge status={vehicle.status} t={(k) => {
-                        const map: Record<string, string> = {
-                          'status.active': t('status.active'),
-                          'status.maintenance': t('status.maintenance'),
-                          'status.returning': t('status.returning'),
-                        };
-                        return map[k] ?? k;
-                      }} />
+                      <ExpiryCell dateStr={vehicle.registration_expiry} />
+                    </td>
+                    <td className="table-cell">
+                      <Badge status={vehicle.status} t={(k) => t(k)} />
                     </td>
                   </tr>
                 ))}

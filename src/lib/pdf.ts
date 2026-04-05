@@ -18,7 +18,7 @@ function formatCurrency(amount: number): string {
 }
 
 export function generateInvoicePDF(invoice: Invoice): void {
-  const lang = invoice.client?.language || 'it';
+  const lang = invoice.client?.country === 'SI' ? 'sl' : 'it';
   const isIT = lang === 'it';
 
   const labels = {
@@ -97,7 +97,7 @@ export function generateInvoicePDF(invoice: Invoice): void {
   doc.setTextColor(...textDark);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
-  doc.text(invoice.client?.name || '-', 18, yPos + 7);
+  doc.text(invoice.client?.company_name || '-', 18, yPos + 7);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
@@ -116,8 +116,8 @@ export function generateInvoicePDF(invoice: Invoice): void {
     doc.text(`${labels.address}: ${invoice.client.address}`, 18, clientY);
     clientY += 5;
   }
-  if (invoice.client?.tax_id) {
-    doc.text(`${labels.taxId}: ${invoice.client.tax_id}`, 18, clientY);
+  if (invoice.client?.tax_number) {
+    doc.text(`${labels.taxId}: ${invoice.client.tax_number}`, 18, clientY);
   }
 
   // Vehicle details block
