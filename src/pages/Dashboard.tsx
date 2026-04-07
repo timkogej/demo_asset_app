@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import { triggerMonthlyInvoiceWebhook } from '../lib/n8n';
+import { clientDisplayName } from '../lib/clientHelpers';
 import KpiCard from '../components/ui/KpiCard';
 import Badge from '../components/ui/Badge';
 import type { Vehicle, Invoice, Penalty, Language } from '../types';
@@ -115,7 +116,7 @@ export default function Dashboard({ t }: DashboardProps) {
       const [vehiclesRes, invoicesRes] = await Promise.all([
         supabase
           .from('vehicles')
-          .select(`*, client:clients(id, company_name, email, country)`)
+          .select(`*, client:clients(id, company_name, company_name_additional, email, country)`)
           .order('created_at', { ascending: false }),
         supabase
           .from('invoices')
@@ -217,7 +218,7 @@ export default function Dashboard({ t }: DashboardProps) {
       const insertPayload = vehiclesToInvoice.map((vehicle, idx) => {
         const vehiclePenalties = penaltiesByVehicle[vehicle.id] || [];
         const penaltiesTotal = vehiclePenalties.reduce((sum, p) => sum + p.amount, 0);
-        const baseAmount = vehicle.monthly_rate;
+        const baseAmount = vehicle.received_installment ?? 0;
         return {
           client_id: vehicle.client_id,
           vehicle_id: vehicle.id,
@@ -340,8 +341,8 @@ export default function Dashboard({ t }: DashboardProps) {
             <table className="w-full">
               <thead>
                 <tr>
-                  <th className="table-header">{t('vehicles.plate')}</th>
-                  <th className="table-header">{t('vehicles.make')}/{t('vehicles.model')}</th>
+                  <th className="table-header">{t('vehicles.registration_number')}</th>
+                  <th className="table-header">{t('vehicles.vehicle_name')}</th>
                   <th className="table-header">{t('vehicles.client')}</th>
                   <th className="table-header">{t('veh.ownership_status')}</th>
                   <th className="table-header">{t('vehicles.monthly_rate')}</th>
@@ -358,18 +359,17 @@ export default function Dashboard({ t }: DashboardProps) {
                     onClick={() => navigate('/vehicles')}
                   >
                     <td className="table-cell font-mono font-semibold text-primary">
-                      {vehicle.plate}
+                      {vehicle.registration_number}
                     </td>
                     <td className="table-cell">
-                      <span className="font-medium">{vehicle.make}</span>
-                      <span className="text-text-muted ml-1">{vehicle.model}</span>
+                      <span className="font-medium">{vehicle.vehicle_name ?? '—'}</span>
                       {vehicle.year && (
                         <span className="text-text-muted ml-1 text-xs">({vehicle.year})</span>
                       )}
                     </td>
                     <td className="table-cell">
                       {vehicle.client ? (
-                        <span>{vehicle.client.company_name}</span>
+                        <span>{clientDisplayName(vehicle.client)}</span>
                       ) : (
                         <span className="text-text-muted">—</span>
                       )}
@@ -378,7 +378,7 @@ export default function Dashboard({ t }: DashboardProps) {
                       <OwnershipBadge status={vehicle.ownership_status} t={t} />
                     </td>
                     <td className="table-cell font-medium">
-                      {formatCurrency(vehicle.monthly_rate)}
+                      {formatCurrency(vehicle.received_installment)}
                     </td>
                     <td className="table-cell">
                       <ProfitCell value={vehicle.profit_difference} />
@@ -387,7 +387,7 @@ export default function Dashboard({ t }: DashboardProps) {
                       <ExpiryCell dateStr={vehicle.registration_expiry} />
                     </td>
                     <td className="table-cell">
-                      <Badge status={vehicle.status} t={(k) => t(k)} />
+                      <Badge status={vehicle.status ?? ''} t={(k) => t(k)} />
                     </td>
                   </tr>
                 ))}

@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import { generateInvoicePDF } from '../lib/pdf';
 import Badge from '../components/ui/Badge';
+import { clientDisplayName } from '../lib/clientHelpers';
 import type { Invoice, Language } from '../types';
 
 interface PaymentsProps {
@@ -233,9 +234,9 @@ export default function Payments({ t }: PaymentsProps) {
                     <td className="table-cell font-mono text-xs font-semibold text-primary">
                       {invoice.invoice_number}
                     </td>
-                    <td className="table-cell">{invoice.client?.company_name || '—'}</td>
+                    <td className="table-cell">{invoice.client ? clientDisplayName(invoice.client) : '—'}</td>
                     <td className="table-cell font-mono text-xs">
-                      {invoice.vehicle?.plate || '—'}
+                      {invoice.vehicle?.registration_number || '—'}
                     </td>
                     <td className="table-cell text-text-muted">
                       {MONTHS_IT[(invoice.billing_month - 1) % 12]} {invoice.billing_year}

@@ -1,69 +1,63 @@
 export interface Client {
-  id: string;                      // TEXT, 3-12 chars, uppercase letters/numbers e.g. "CLI001"
-  company_name: string;
-  company_name_additional?: string;
-  is_client: boolean;
-  email: string;
-  phone?: string;
-  address?: string;
-  postal_code?: string;
-  city?: string;
-  country?: string;
-  iban?: string;
-  bic?: string;
-  registration_number?: string;
-  tax_number?: string;
-  is_vat_payer: boolean;
-  comment?: string;
+  id: string;                        // custom text ID (e.g. CLI001, NAPO...)
+  company_name: string | null;       // kept for compatibility, may be null
+  company_name_additional: string | null; // main display name (naziv1)
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  postal_code: string | null;
+  city: string | null;
+  country: string | null;            // ISO country code: SI, IT, HR, DE, RO...
+  tax_number: string | null;         // davčna številka
+  registration_number: string | null;// matična številka
+  iban: string | null;
+  bic: string | null;
+  is_client: boolean;                // true = stranka, false = druga oseba
+  is_vat_payer: boolean;             // davčni zavezanec
+  comment: string | null;
   created_at: string;
+  updated_at: string | null;
+
+  // Relations
+  vehicles?: {
+    id: string;
+    registration_number: string;
+    vehicle_name: string | null;
+  }[];
 }
 
 export interface Vehicle {
   id: string;
-  plate: string;
-  make: string;
-  model: string;
+  registration_number: string;
+  vehicle_name: string | null;
   year: number | null;
   current_km: number;
-  status: 'active' | 'maintenance' | 'returning';
+  status: string | null;
   client_id: string | null;
   lease_start_date: string | null;
   lease_end_date: string | null;
-  monthly_rate: number;
-  created_at: string;
-
-  // Ownership
   ownership_status: 'LEASING' | "PROPRIETA'";
   leasing_company: string | null;
   contract_number: string | null;
   lease_installment: number | null;
-
-  // Registration & inspection
   registration_expiry: string | null;
   next_inspection: string | null;
-
-  // Insurance (grouped)
   insurance_company: string | null;
   insurance_expiry: string | null;
   annual_insurance_cost: number | null;
-
-  // Financial
   received_installment: number | null;
   deposit: number | null;
   lease_months: number | null;
   vehicle_country: string | null;
-
-  // Computed (read-only, never sent on insert/update)
   deposit_per_month: number | null;
   monthly_insurance: number | null;
   profit_difference: number | null;
-
-  // Relations (from join)
   client?: {
     id: string;
-    company_name: string;
-    email: string;
-    country: string;
+    company_name: string | null;
+    company_name_additional: string | null;
+    email: string | null;
+    country: string | null;
   } | null;
 }
 
@@ -125,9 +119,8 @@ export interface VehicleFile {
   category: string;
   uploaded_at: string;
   vehicle?: {
-    plate: string;
-    make: string;
-    model: string;
+    registration_number: string;
+    vehicle_name: string | null;
   };
 }
 

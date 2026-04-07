@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { clientDisplayName } from '../lib/clientHelpers';
 import type { Penalty, Vehicle, Language } from '../types';
 
 interface PenaltiesProps {
@@ -190,9 +191,9 @@ export default function Penalties({ t }: PenaltiesProps) {
                       className={`table-row ${isPending ? 'bg-amber-50 hover:bg-amber-100/60' : ''}`}
                     >
                       <td className="table-cell font-mono font-semibold text-primary">
-                        {penalty.vehicle?.plate || '—'}
+                        {penalty.vehicle?.registration_number || '—'}
                       </td>
-                      <td className="table-cell">{penalty.client?.company_name || '—'}</td>
+                      <td className="table-cell">{penalty.client ? clientDisplayName(penalty.client) : '—'}</td>
                       <td className="table-cell font-semibold text-danger">
                         {formatCurrency(penalty.amount)}
                       </td>
@@ -249,8 +250,8 @@ export default function Penalties({ t }: PenaltiesProps) {
               <option value="">— {t('penalties.select_vehicle')} —</option>
               {vehicles.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {v.plate} — {v.make} {v.model}
-                  {v.client ? ` (${v.client.company_name})` : ''}
+                  {v.registration_number}{v.vehicle_name ? ` — ${v.vehicle_name}` : ''}
+                  {v.client ? ` (${clientDisplayName(v.client)})` : ''}
                 </option>
               ))}
             </select>
@@ -261,7 +262,7 @@ export default function Penalties({ t }: PenaltiesProps) {
           {getSelectedVehicle()?.client && (
             <div className="bg-accent-soft/50 rounded-10 px-3 py-2 text-xs text-text-muted">
               <span className="font-medium text-text-dark">
-                {getSelectedVehicle()?.client?.company_name}
+                {getSelectedVehicle()?.client ? clientDisplayName(getSelectedVehicle()!.client!) : ''}
               </span>
               {' — '}
               {getSelectedVehicle()?.client?.email}

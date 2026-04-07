@@ -136,7 +136,7 @@ export function generateInvoicePDF(invoice: Invoice): void {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   const vehicleTitle = invoice.vehicle
-    ? `${invoice.vehicle.make} ${invoice.vehicle.model}`
+    ? (invoice.vehicle.vehicle_name ?? invoice.vehicle.registration_number ?? '-')
     : '-';
   doc.text(vehicleTitle, colX + 4, yPos + 7);
 
@@ -145,8 +145,8 @@ export function generateInvoicePDF(invoice: Invoice): void {
   doc.setTextColor(...textMuted);
 
   let vehicleY = yPos + 13;
-  if (invoice.vehicle?.plate) {
-    doc.text(`${labels.plate}: ${invoice.vehicle.plate}`, colX + 4, vehicleY);
+  if (invoice.vehicle?.registration_number) {
+    doc.text(`${labels.plate}: ${invoice.vehicle.registration_number}`, colX + 4, vehicleY);
     vehicleY += 5;
   }
   if (invoice.vehicle?.year) {

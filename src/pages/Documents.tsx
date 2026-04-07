@@ -93,8 +93,8 @@ export default function Documents({ t }: DocumentsProps) {
   useEffect(() => {
     supabase
       .from('vehicles')
-      .select('id, plate, make, model')
-      .order('plate')
+      .select('id, registration_number, vehicle_name')
+      .order('registration_number')
       .then(({ data }) => setVehicles((data as Vehicle[]) ?? []));
   }, []);
 
@@ -104,7 +104,7 @@ export default function Documents({ t }: DocumentsProps) {
     try {
       let query = supabase
         .from('vehicle_files')
-        .select('*, vehicle:vehicles(plate, make, model)')
+        .select('*, vehicle:vehicles(registration_number, vehicle_name)')
         .order('uploaded_at', { ascending: false });
       if (selectedVehicleId) query = query.eq('vehicle_id', selectedVehicleId);
       const { data, error } = await query;
@@ -213,7 +213,7 @@ export default function Documents({ t }: DocumentsProps) {
             <option value="">{t('doc.all_vehicles')}</option>
             {vehicles.map((v) => (
               <option key={v.id} value={v.id}>
-                {v.plate} — {v.make} {v.model}
+                {v.registration_number}{v.vehicle_name ? ` — ${v.vehicle_name}` : ''}
               </option>
             ))}
           </select>
@@ -404,7 +404,7 @@ export default function Documents({ t }: DocumentsProps) {
                   {/* Vehicle plate (all-vehicles view) */}
                   {!selectedVehicleId && (
                     <td className="table-cell text-xs font-mono">
-                      {file.vehicle?.plate ?? '—'}
+                      {file.vehicle?.registration_number ?? '—'}
                     </td>
                   )}
 

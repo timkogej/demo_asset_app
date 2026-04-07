@@ -25,8 +25,8 @@ interface MonthlyRevenue {
 }
 
 interface VehicleProfit {
-  plate: string;
-  makeModel: string;
+  registration_number: string;
+  vehicleName: string;
   invoiced: number;
   collected: number;
   pending: number;
@@ -111,8 +111,8 @@ export default function Analytics({ t }: AnalyticsProps) {
     const key = inv.vehicle_id;
     if (!vehicleMap[key]) {
       vehicleMap[key] = {
-        plate: inv.vehicle.plate,
-        makeModel: `${inv.vehicle.make} ${inv.vehicle.model}`,
+        registration_number: inv.vehicle.registration_number,
+        vehicleName: inv.vehicle.vehicle_name ?? '',
         invoiced: 0,
         collected: 0,
         pending: 0,
@@ -134,7 +134,7 @@ export default function Analytics({ t }: AnalyticsProps) {
     const key = inv.client_id;
     if (!clientMap[key]) {
       clientMap[key] = {
-        name: inv.client.company_name,
+        name: inv.client.company_name_additional || inv.client.company_name || inv.client_id,
         invoiced: 0,
         collected: 0,
       };
@@ -315,8 +315,8 @@ export default function Analytics({ t }: AnalyticsProps) {
             <table className="w-full">
               <thead>
                 <tr>
-                  <th className="table-header">{t('vehicles.plate')}</th>
-                  <th className="table-header">{t('vehicles.make')}/{t('vehicles.model')}</th>
+                  <th className="table-header">{t('vehicles.registration_number')}</th>
+                  <th className="table-header">{t('vehicles.vehicle_name')}</th>
                   <th className="table-header">{t('analytics.total_invoiced')}</th>
                   <th className="table-header">{t('analytics.total_collected')}</th>
                   <th className="table-header">{t('analytics.pending')}</th>
@@ -328,8 +328,8 @@ export default function Analytics({ t }: AnalyticsProps) {
                   const rate = vp.invoiced > 0 ? (vp.collected / vp.invoiced) * 100 : 0;
                   return (
                     <tr key={idx} className="table-row">
-                      <td className="table-cell font-mono font-semibold text-primary">{vp.plate}</td>
-                      <td className="table-cell text-text-muted">{vp.makeModel}</td>
+                      <td className="table-cell font-mono font-semibold text-primary">{vp.registration_number}</td>
+                      <td className="table-cell text-text-muted">{vp.vehicleName}</td>
                       <td className="table-cell font-medium">{formatCurrency(vp.invoiced)}</td>
                       <td className="table-cell text-success font-medium">
                         {formatCurrency(vp.collected)}

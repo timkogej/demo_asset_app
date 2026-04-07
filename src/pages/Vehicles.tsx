@@ -1,43 +1,46 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Car, Plus, Pencil, Trash2, AlertCircle, Clock, TrendingUp, TrendingDown,
-  AlertTriangle, X,
+  AlertTriangle, X, Info, ChevronUp, ChevronDown,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
+import { clientDisplayName } from '../lib/clientHelpers';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import SearchInput from '../components/ui/SearchInput';
 import Combobox from '../components/ui/Combobox';
 import type { Vehicle, Client, Language } from '../types';
 
-// ─── Props ───────────────────────────────────────────────────────────────────
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface VehiclesProps {
   t: (key: string) => string;
   language: Language;
 }
 
-// ─── Local types ─────────────────────────────────────────────────────────────
+// ─── Local types ──────────────────────────────────────────────────────────────
 
-type StatusFilter = 'all' | 'active' | 'maintenance' | 'returning';
 type OwnershipFilter = 'all' | 'LEASING' | "PROPRIETA'";
-type DrawerTab = 'details' | 'edit';
-type PlateEditMode = 'readonly' | 'confirming' | 'editing';
+type RegEditMode = 'readonly' | 'confirming' | 'editing';
+type SortDir = 'asc' | 'desc';
+
+interface SortConfig {
+  key: string;
+  dir: SortDir;
+}
 
 interface VehicleFormData {
-  plate: string;
-  make: string;
-  model: string;
+  registration_number: string;
+  vehicle_name: string;
   year: string;
   current_km: string;
   status: 'active' | 'maintenance' | 'returning';
   client_id: string;
   lease_start_date: string;
   lease_end_date: string;
-  monthly_rate: string;
   ownership_status: 'LEASING' | "PROPRIETA'";
   leasing_company: string;
   contract_number: string;
@@ -53,19 +56,17 @@ interface VehicleFormData {
   vehicle_country: string;
 }
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const emptyForm: VehicleFormData = {
-  plate: '',
-  make: '',
-  model: '',
+  registration_number: '',
+  vehicle_name: '',
   year: '',
   current_km: '',
   status: 'active',
   client_id: '',
   lease_start_date: '',
   lease_end_date: '',
-  monthly_rate: '',
   ownership_status: 'LEASING',
   leasing_company: '',
   contract_number: '',
@@ -81,20 +82,18 @@ const emptyForm: VehicleFormData = {
   vehicle_country: '',
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function vehicleToForm(v: Vehicle): VehicleFormData {
   return {
-    plate: v.plate,
-    make: v.make,
-    model: v.model,
+    registration_number: v.registration_number,
+    vehicle_name: v.vehicle_name ?? '',
     year: v.year?.toString() ?? '',
     current_km: v.current_km.toString(),
-    status: v.status,
+    status: (v.status as 'active' | 'maintenance' | 'returning') ?? 'active',
     client_id: v.client_id ?? '',
     lease_start_date: v.lease_start_date ?? '',
     lease_end_date: v.lease_end_date ?? '',
-    monthly_rate: v.monthly_rate.toString(),
     ownership_status: v.ownership_status,
     leasing_company: v.leasing_company ?? '',
     contract_number: v.contract_number ?? '',
@@ -114,16 +113,14 @@ function vehicleToForm(v: Vehicle): VehicleFormData {
 function buildPayload(form: VehicleFormData) {
   const isProprieta = form.ownership_status === "PROPRIETA'";
   return {
-    plate: form.plate.trim().toUpperCase(),
-    make: form.make.trim(),
-    model: form.model.trim(),
+    registration_number: form.registration_number.trim().toUpperCase(),
+    vehicle_name: form.vehicle_name.trim() || null,
     year: form.year ? parseInt(form.year) : null,
     current_km: parseInt(form.current_km) || 0,
     status: form.status,
     client_id: form.client_id || null,
     lease_start_date: form.lease_start_date || null,
     lease_end_date: form.lease_end_date || null,
-    monthly_rate: parseFloat(form.monthly_rate) || 0,
     ownership_status: form.ownership_status,
     leasing_company: isProprieta ? null : (form.leasing_company || null),
     contract_number: isProprieta ? '*-*' : (form.contract_number || null),
@@ -184,7 +181,31 @@ function computeValues(form: VehicleFormData) {
   return { depPerMonth, monthlyIns, profitDiff };
 }
 
-// ─── Inline display components ────────────────────────────────────────────────
+function getSortValue(v: Vehicle, key: string): string | number | null {
+  switch (key) {
+    case 'registration_number': return v.registration_number;
+    case 'vehicle_name': return v.vehicle_name;
+    case 'status': return v.status;
+    case 'ownership_status': return v.ownership_status;
+    case 'leasing_company': return v.leasing_company;
+    case 'contract_number': return v.contract_number;
+    case 'lease_installment': return v.lease_installment;
+    case 'received_installment': return v.received_installment;
+    case 'insurance_company': return v.insurance_company;
+    case 'insurance_expiry': return v.insurance_expiry;
+    case 'monthly_insurance': return v.monthly_insurance;
+    case 'deposit': return v.deposit;
+    case 'lease_months': return v.lease_months;
+    case 'deposit_per_month': return v.deposit_per_month;
+    case 'profit_difference': return v.profit_difference;
+    case 'registration_expiry': return v.registration_expiry;
+    case 'next_inspection': return v.next_inspection;
+    case 'client': return v.client ? clientDisplayName(v.client) : null;
+    default: return null;
+  }
+}
+
+// ─── Small display components ─────────────────────────────────────────────────
 
 function ExpiryCell({ dateStr }: { dateStr: string | null }) {
   const status = getExpiryStatus(dateStr);
@@ -255,8 +276,8 @@ interface VehicleFormContentProps {
   setForm: React.Dispatch<React.SetStateAction<VehicleFormData>>;
   errors: Partial<Record<keyof VehicleFormData, string>>;
   isEdit?: boolean;
-  plateEditMode?: PlateEditMode;
-  setPlateEditMode?: (m: PlateEditMode) => void;
+  regEditMode?: RegEditMode;
+  setRegEditMode?: (m: RegEditMode) => void;
   clients: Client[];
   leasingCompanies: string[];
   insuranceCompanies: string[];
@@ -268,8 +289,8 @@ function VehicleFormContent({
   setForm,
   errors,
   isEdit,
-  plateEditMode,
-  setPlateEditMode,
+  regEditMode,
+  setRegEditMode,
   clients,
   leasingCompanies,
   insuranceCompanies,
@@ -304,12 +325,12 @@ function VehicleFormContent({
           {t('veh.section_vehicle')}
         </h4>
         <div className="grid grid-cols-2 gap-3">
-          {/* Plate */}
+          {/* Registration number */}
           <div className="col-span-2">
-            <label className="label">{t('vehicles.plate')} *</label>
-            {isEdit && plateEditMode !== 'editing' ? (
+            <label className="label">{t('vehicles.registration_number')} *</label>
+            {isEdit && regEditMode !== 'editing' ? (
               <>
-                {plateEditMode === 'confirming' && (
+                {regEditMode === 'confirming' && (
                   <div
                     className="mb-2 flex items-start gap-2 px-3 py-2 rounded-10 border text-sm"
                     style={{ backgroundColor: '#fef3c7', borderColor: '#fcd34d' }}
@@ -323,14 +344,14 @@ function VehicleFormContent({
                         <button
                           type="button"
                           className="text-xs px-2 py-1 rounded bg-amber-600 text-white font-medium hover:bg-amber-700"
-                          onClick={() => setPlateEditMode?.('editing')}
+                          onClick={() => setRegEditMode?.('editing')}
                         >
                           {t('veh.yes_edit')}
                         </button>
                         <button
                           type="button"
                           className="text-xs px-2 py-1 rounded border border-amber-400 text-amber-800 hover:bg-amber-50"
-                          onClick={() => setPlateEditMode?.('readonly')}
+                          onClick={() => setRegEditMode?.('readonly')}
                         >
                           {t('btn.cancel')}
                         </button>
@@ -341,13 +362,13 @@ function VehicleFormContent({
                 <div className="flex items-center gap-2">
                   <input
                     className="input-field font-mono bg-bg cursor-not-allowed flex-1"
-                    value={form.plate}
+                    value={form.registration_number}
                     readOnly
                   />
                   <button
                     type="button"
                     className="p-2 text-text-muted hover:text-primary transition-colors rounded-10 hover:bg-accent-soft border border-accent-muted"
-                    onClick={() => setPlateEditMode?.('confirming')}
+                    onClick={() => setRegEditMode?.('confirming')}
                     title={t('btn.edit')}
                   >
                     <Pencil size={14} strokeWidth={1.8} />
@@ -357,24 +378,25 @@ function VehicleFormContent({
             ) : (
               <input
                 className="input-field font-mono"
-                value={form.plate}
-                onChange={upd('plate')}
+                value={form.registration_number}
+                onChange={upd('registration_number')}
                 placeholder="AB 123 CD"
               />
             )}
-            {errors.plate && <p className="error-text">{errors.plate}</p>}
+            {errors.registration_number && <p className="error-text">{errors.registration_number}</p>}
           </div>
 
-          <div>
-            <label className="label">{t('vehicles.make')} *</label>
-            <input className="input-field" value={form.make} onChange={upd('make')} placeholder="BMW" />
-            {errors.make && <p className="error-text">{errors.make}</p>}
+          {/* Vehicle name */}
+          <div className="col-span-2">
+            <label className="label">{t('vehicles.vehicle_name')}</label>
+            <input
+              className="input-field"
+              value={form.vehicle_name}
+              onChange={upd('vehicle_name')}
+              placeholder="BMW 320d"
+            />
           </div>
-          <div>
-            <label className="label">{t('vehicles.model')} *</label>
-            <input className="input-field" value={form.model} onChange={upd('model')} placeholder="320d" />
-            {errors.model && <p className="error-text">{errors.model}</p>}
-          </div>
+
           <div>
             <label className="label">{t('vehicles.year')}</label>
             <input type="number" className="input-field" value={form.year} onChange={upd('year')} placeholder="2023" min="1990" max="2030" />
@@ -395,10 +417,6 @@ function VehicleFormContent({
           <div>
             <label className="label">{t('veh.vehicle_country')}</label>
             <input className="input-field" value={form.vehicle_country} onChange={upd('vehicle_country')} placeholder="IT" />
-          </div>
-          <div>
-            <label className="label">{t('veh.monthly_rate')} (€)</label>
-            <input type="number" className="input-field" value={form.monthly_rate} onChange={upd('monthly_rate')} placeholder="650.00" min="0" step="0.01" />
           </div>
 
           {/* Ownership toggle */}
@@ -537,7 +555,7 @@ function VehicleFormContent({
             <option value="">{t('vehicles.no_client')}</option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
-                [{c.id}] {c.company_name}
+                [{c.id}] {clientDisplayName(c)}
               </option>
             ))}
           </select>
@@ -573,11 +591,10 @@ function VehicleFormContent({
   );
 }
 
-// ─── VehicleDrawer ────────────────────────────────────────────────────────────
+// ─── VehicleEditDrawer ────────────────────────────────────────────────────────
 
-interface VehicleDrawerProps {
+interface VehicleEditDrawerProps {
   vehicle: Vehicle;
-  initialTab?: DrawerTab;
   clients: Client[];
   leasingCompanies: string[];
   insuranceCompanies: string[];
@@ -587,9 +604,8 @@ interface VehicleDrawerProps {
   onDelete: (id: string) => void;
 }
 
-function VehicleDrawer({
+function VehicleEditDrawer({
   vehicle,
-  initialTab = 'details',
   clients,
   leasingCompanies,
   insuranceCompanies,
@@ -597,24 +613,20 @@ function VehicleDrawer({
   onClose,
   onSaved,
   onDelete,
-}: VehicleDrawerProps) {
-  const [tab, setTab] = useState<DrawerTab>(initialTab);
+}: VehicleEditDrawerProps) {
   const [form, setForm] = useState<VehicleFormData>(() => vehicleToForm(vehicle));
-  const [plateEditMode, setPlateEditMode] = useState<PlateEditMode>('readonly');
+  const [regEditMode, setRegEditMode] = useState<RegEditMode>('readonly');
   const [errors, setErrors] = useState<Partial<Record<keyof VehicleFormData, string>>>({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setForm(vehicleToForm(vehicle));
-    setPlateEditMode('readonly');
+    setRegEditMode('readonly');
     setErrors({});
-    setTab('details');
   }, [vehicle]);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handler);
     document.body.style.overflow = 'hidden';
     return () => {
@@ -625,9 +637,7 @@ function VehicleDrawer({
 
   const validate = () => {
     const errs: Partial<Record<keyof VehicleFormData, string>> = {};
-    if (!form.plate.trim()) errs.plate = t('form.required');
-    if (!form.make.trim()) errs.make = t('form.required');
-    if (!form.model.trim()) errs.model = t('form.required');
+    if (!form.registration_number.trim()) errs.registration_number = t('form.required');
     if (!form.current_km || isNaN(Number(form.current_km))) errs.current_km = t('form.required');
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -652,12 +662,6 @@ function VehicleDrawer({
     }
   };
 
-  const isLeasing = vehicle.ownership_status === 'LEASING';
-  const { depPerMonth, monthlyIns, profitDiff } = useMemo(
-    () => computeValues(vehicleToForm(vehicle)),
-    [vehicle]
-  );
-
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
@@ -665,8 +669,8 @@ function VehicleDrawer({
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-accent-soft shrink-0">
           <div>
-            <p className="font-mono font-bold text-primary text-lg leading-none">{vehicle.plate}</p>
-            <p className="text-sm text-text-muted mt-0.5">{vehicle.make} {vehicle.model}</p>
+            <p className="font-mono font-bold text-primary text-lg leading-none">{vehicle.registration_number}</p>
+            {vehicle.vehicle_name && <p className="text-sm text-text-muted mt-0.5">{vehicle.vehicle_name}</p>}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -676,204 +680,239 @@ function VehicleDrawer({
             >
               <Trash2 size={16} strokeWidth={1.8} />
             </button>
+            <button onClick={onClose} className="p-1.5 text-text-muted hover:text-text-dark transition-colors">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          <VehicleFormContent
+            form={form}
+            setForm={setForm}
+            errors={errors}
+            isEdit={true}
+            regEditMode={regEditMode}
+            setRegEditMode={setRegEditMode}
+            clients={clients}
+            leasingCompanies={leasingCompanies}
+            insuranceCompanies={insuranceCompanies}
+            t={t}
+          />
+          <div className="mt-6 pt-4 border-t border-accent-soft flex gap-3 justify-end">
+            <button onClick={onClose} className="btn-secondary">{t('btn.cancel')}</button>
+            <button onClick={handleSave} disabled={saving} className="btn-primary">
+              {saving ? t('common.loading') : t('veh.save_changes')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── VehicleDetailModal ───────────────────────────────────────────────────────
+
+interface VehicleDetailModalProps {
+  vehicle: Vehicle;
+  t: (key: string) => string;
+  onClose: () => void;
+  onEdit: () => void;
+}
+
+function VehicleDetailModal({ vehicle, t, onClose, onEdit }: VehicleDetailModalProps) {
+  const isLeasing = vehicle.ownership_status === 'LEASING';
+  const { depPerMonth, monthlyIns, profitDiff } = useMemo(
+    () => computeValues(vehicleToForm(vehicle)),
+    [vehicle]
+  );
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', handler);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-surface rounded-10 shadow-xl border border-accent-muted w-full max-w-[680px] max-h-[90vh] flex flex-col animate-slideIn">
+        {/* Header */}
+        <div className="flex items-start justify-between px-6 py-5 border-b border-accent-soft shrink-0">
+          <div>
+            <p className="font-mono font-bold text-primary text-2xl leading-tight">
+              {vehicle.registration_number}
+            </p>
+            {vehicle.vehicle_name && (
+              <p className="text-text-dark text-base mt-0.5">{vehicle.vehicle_name}</p>
+            )}
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <Badge status={vehicle.status ?? ''} t={(k) => t(k)} />
+              <OwnershipBadge status={vehicle.ownership_status} t={t} />
+              {vehicle.vehicle_country && (
+                <span className="text-xs text-text-muted bg-bg border border-accent-muted px-2 py-0.5 rounded-full">
+                  {vehicle.vehicle_country}
+                </span>
+              )}
+              {vehicle.year && (
+                <span className="text-xs text-text-muted bg-bg border border-accent-muted px-2 py-0.5 rounded-full">
+                  {vehicle.year}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-4">
+            <button
+              onClick={onEdit}
+              className="p-1.5 text-text-muted hover:text-primary transition-colors rounded-10 hover:bg-accent-soft"
+              title={t('btn.edit')}
+            >
+              <Pencil size={16} strokeWidth={1.8} />
+            </button>
             <button
               onClick={onClose}
-              className="p-1.5 text-text-muted hover:text-text-dark transition-colors"
+              className="p-1.5 text-text-muted hover:text-text-dark transition-colors rounded-10 hover:bg-bg"
             >
               <X size={18} />
             </button>
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-accent-soft shrink-0">
-          {(['details', 'edit'] as const).map((t_key) => (
-            <button
-              key={t_key}
-              onClick={() => setTab(t_key)}
-              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
-                tab === t_key
-                  ? 'text-primary border-b-2 border-primary'
-                  : 'text-text-muted hover:text-text-dark'
-              }`}
-            >
-              {t_key === 'details' ? t('veh.details_tab') : t('veh.edit_tab')}
-            </button>
-          ))}
-        </div>
-
         {/* Body */}
-        <div className="flex-1 overflow-y-auto">
-          {tab === 'details' ? (
-            <div className="p-5 space-y-5">
-              {/* Veicolo */}
-              <section>
-                <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
-                  {t('veh.section_vehicle')}
-                </h4>
-                <div className="space-y-2">
-                  <div className="flex items-baseline gap-3">
-                    <span className="font-mono font-bold text-xl text-primary">{vehicle.plate}</span>
-                    <span className="text-text-muted text-sm">{vehicle.make} {vehicle.model} {vehicle.year ? `(${vehicle.year})` : ''}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge status={vehicle.status} t={(k) => t(k)} />
-                    <OwnershipBadge status={vehicle.ownership_status} t={t} />
-                    {vehicle.vehicle_country && (
-                      <span className="text-xs text-text-muted bg-bg border border-accent-muted px-2 py-0.5 rounded-full">
-                        {vehicle.vehicle_country}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm text-text-muted">
-                    {vehicle.current_km.toLocaleString('it-IT')} km
-                    {vehicle.year ? ` · ${vehicle.year}` : ''}
-                  </p>
-                </div>
-              </section>
+        <div className="overflow-y-auto flex-1 p-6 space-y-4">
+          {/* KM */}
+          <p className="text-sm text-text-muted">
+            {vehicle.current_km.toLocaleString('it-IT')} km
+          </p>
 
-              {/* Leasing */}
-              {isLeasing && (
-                <section>
-                  <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
-                    {t('veh.section_leasing')}
-                  </h4>
-                  <div className="rounded-10 border border-accent-muted p-3 space-y-2 bg-accent-soft/30">
-                    {[
-                      [t('veh.leasing_company'), vehicle.leasing_company],
-                      [t('veh.contract_number'), vehicle.contract_number],
-                      [t('veh.lease_installment'), formatCurrency(vehicle.lease_installment)],
-                      [t('veh.received_installment'), formatCurrency(vehicle.received_installment)],
-                      [t('veh.lease_months'), vehicle.lease_months ? `${vehicle.lease_months} mesi` : '—'],
-                      [t('veh.deposit'), formatCurrency(vehicle.deposit)],
-                      [t('veh.deposit_per_month'), depPerMonth !== null ? <span className="italic text-text-muted">= {formatCurrency(depPerMonth)}</span> : '—'],
-                    ].map(([label, value]) => (
-                      <div key={String(label)} className="flex justify-between text-sm">
-                        <span className="text-text-muted">{label}</span>
-                        <span className="font-medium text-right">{value || '—'}</span>
-                      </div>
-                    ))}
+          {/* Leasing section */}
+          {isLeasing && (
+            <div className="rounded-10 border border-accent-muted p-4" style={{ backgroundColor: 'var(--color-accent-soft)' }}>
+              <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
+                {t('veh.section_leasing')}
+              </h4>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                {[
+                  [t('veh.leasing_company'), vehicle.leasing_company],
+                  [t('veh.contract_number'), vehicle.contract_number],
+                  [t('veh.lease_installment'), formatCurrency(vehicle.lease_installment)],
+                  [t('veh.received_installment'), formatCurrency(vehicle.received_installment)],
+                  [t('veh.lease_months'), vehicle.lease_months ? `${vehicle.lease_months} ${t('common.months')}` : '—'],
+                  [t('veh.deposit'), formatCurrency(vehicle.deposit)],
+                ].map(([label, value]) => (
+                  <div key={String(label)}>
+                    <p className="text-xs text-text-muted">{label}</p>
+                    <p className="text-sm font-medium text-text-dark">{value || '—'}</p>
                   </div>
-                </section>
-              )}
-
-              {/* Assicurazione */}
-              <section>
-                <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
-                  {t('veh.insurance_section')}
-                </h4>
-                <div className="rounded-10 border p-3 space-y-2" style={{ backgroundColor: '#f0f9ff', borderColor: '#bfdbfe' }}>
-                  {[
-                    [t('veh.insurance_company'), vehicle.insurance_company],
-                    [t('veh.insurance_expiry'), <ExpiryCell key="ins" dateStr={vehicle.insurance_expiry} />],
-                    [t('veh.annual_insurance_cost'), formatCurrency(vehicle.annual_insurance_cost)],
-                    [t('veh.monthly_insurance'), monthlyIns !== null ? <span className="italic text-text-muted">= {formatCurrency(monthlyIns)}</span> : '—'],
-                  ].map(([label, value]) => (
-                    <div key={String(label)} className="flex justify-between text-sm">
-                      <span className="text-text-muted">{label}</span>
-                      <span className="font-medium">{value || '—'}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* Margine mensile */}
-              <section>
-                <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
-                  {t('veh.profit_difference')}
-                </h4>
-                <div className="rounded-10 border border-accent-muted p-3 bg-bg">
-                  <div className="flex items-center justify-between flex-wrap gap-2 text-xs text-text-muted mb-3">
-                    <div className="text-center">
-                      <p className="font-medium text-text-dark">{formatCurrency(depPerMonth ?? 0)}</p>
-                      <p>{t('veh.deposit_per_month')}</p>
-                    </div>
-                    <span>+</span>
-                    <div className="text-center">
-                      <p className="font-medium text-text-dark">{formatCurrency(vehicle.received_installment ?? 0)}</p>
-                      <p>{t('veh.received_installment')}</p>
-                    </div>
-                    <span>−</span>
-                    <div className="text-center">
-                      <p className="font-medium text-text-dark">{isLeasing ? formatCurrency(vehicle.lease_installment ?? 0) : '€0.00'}</p>
-                      <p>{t('veh.lease_installment')}</p>
-                    </div>
-                    <span>−</span>
-                    <div className="text-center">
-                      <p className="font-medium text-text-dark">{formatCurrency(monthlyIns ?? 0)}</p>
-                      <p>{t('veh.monthly_insurance')}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-center gap-2 pt-2 border-t border-accent-soft">
-                    <span className="text-text-muted text-xs">=</span>
-                    <span className={`text-lg font-bold ${
-                      profitDiff === null ? 'text-text-muted' :
-                      profitDiff > 0 ? 'text-success' : 'text-danger'
-                    }`}>
-                      {profitDiff !== null ? formatCurrency(profitDiff) : '—'}
-                    </span>
-                  </div>
-                </div>
-              </section>
-
-              {/* Scadenze */}
-              <section>
-                <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
-                  {t('veh.section_expiry')}
-                </h4>
-                <div className="space-y-2">
-                  {[
-                    [t('veh.registration_expiry'), vehicle.registration_expiry],
-                    [t('veh.next_inspection'), vehicle.next_inspection],
-                    [t('veh.insurance_expiry'), vehicle.insurance_expiry],
-                  ].map(([label, date]) => (
-                    <div key={String(label)} className="flex justify-between text-sm">
-                      <span className="text-text-muted">{label}</span>
-                      <ExpiryCell dateStr={String(date ?? '')} />
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* Cliente */}
-              {vehicle.client && (
-                <section>
-                  <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
-                    {t('veh.section_client')}
-                  </h4>
-                  <div className="rounded-10 border border-accent-soft p-3 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono bg-accent-soft text-primary px-2 py-0.5 rounded-full">
-                        {vehicle.client.id}
-                      </span>
-                      <span className="font-medium text-sm">{vehicle.client.company_name}</span>
-                    </div>
-                    <p className="text-xs text-text-muted">{vehicle.client.email}</p>
-                    <p className="text-xs text-text-muted">{vehicle.client.country}</p>
-                  </div>
-                </section>
-              )}
-            </div>
-          ) : (
-            <div className="p-5">
-              <VehicleFormContent
-                form={form}
-                setForm={setForm}
-                errors={errors}
-                isEdit={true}
-                plateEditMode={plateEditMode}
-                setPlateEditMode={setPlateEditMode}
-                clients={clients}
-                leasingCompanies={leasingCompanies}
-                insuranceCompanies={insuranceCompanies}
-                t={t}
-              />
-              <div className="mt-6 pt-4 border-t border-accent-soft flex gap-3 justify-end">
-                <button onClick={onClose} className="btn-secondary">{t('btn.cancel')}</button>
-                <button onClick={handleSave} disabled={saving} className="btn-primary">
-                  {saving ? t('common.loading') : t('veh.save_changes')}
-                </button>
+                ))}
               </div>
+            </div>
+          )}
+
+          {/* Insurance section */}
+          <div className="rounded-10 border p-4" style={{ backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }}>
+            <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
+              {t('veh.insurance_section')}
+            </h4>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+              <div>
+                <p className="text-xs text-text-muted">{t('veh.insurance_company')}</p>
+                <p className="text-sm font-medium text-text-dark">{vehicle.insurance_company || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-text-muted">{t('veh.insurance_expiry')}</p>
+                <ExpiryCell dateStr={vehicle.insurance_expiry} />
+              </div>
+              <div>
+                <p className="text-xs text-text-muted">{t('veh.annual_insurance_cost')}</p>
+                <p className="text-sm font-medium text-text-dark">{formatCurrency(vehicle.annual_insurance_cost)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-text-muted">{t('veh.monthly_insurance')}</p>
+                <p className="text-sm font-medium italic text-text-muted">
+                  {monthlyIns !== null ? `= ${formatCurrency(monthlyIns)}` : '—'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Monthly calculation section */}
+          <div className="rounded-10 border p-4" style={{ backgroundColor: '#fffbeb', borderColor: '#fcd34d' }}>
+            <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
+              {t('veh.section_financial')}
+            </h4>
+            <div className="flex items-center justify-between flex-wrap gap-2 text-xs text-text-muted">
+              <div className="text-center">
+                <p className="font-medium text-text-dark text-sm">{formatCurrency(depPerMonth ?? 0)}</p>
+                <p>{t('veh.deposit_per_month')}</p>
+              </div>
+              <span className="text-text-muted">+</span>
+              <div className="text-center">
+                <p className="font-medium text-text-dark text-sm">{formatCurrency(vehicle.received_installment ?? 0)}</p>
+                <p>{t('veh.received_installment')}</p>
+              </div>
+              <span className="text-text-muted">−</span>
+              <div className="text-center">
+                <p className="font-medium text-text-dark text-sm">
+                  {isLeasing ? formatCurrency(vehicle.lease_installment ?? 0) : '€0.00'}
+                </p>
+                <p>{t('veh.lease_installment')}</p>
+              </div>
+              <span className="text-text-muted">−</span>
+              <div className="text-center">
+                <p className="font-medium text-text-dark text-sm">{formatCurrency(monthlyIns ?? 0)}</p>
+                <p>{t('veh.monthly_insurance')}</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-center gap-2 pt-3 mt-3 border-t border-amber-200">
+              <span className="text-text-muted text-xs">=</span>
+              <span className={`text-xl font-bold ${
+                profitDiff === null ? 'text-text-muted' :
+                profitDiff > 0 ? 'text-success' : 'text-danger'
+              }`}>
+                {profitDiff !== null ? formatCurrency(profitDiff) : '—'}
+              </span>
+              <span className="text-xs text-text-muted">{t('veh.profit_difference')}</span>
+            </div>
+          </div>
+
+          {/* Scadenze section */}
+          <div className="rounded-10 border p-4" style={{ backgroundColor: '#faf5ff', borderColor: '#d8b4fe' }}>
+            <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
+              {t('veh.section_expiry')}
+            </h4>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+              {[
+                [t('veh.registration_expiry'), vehicle.registration_expiry],
+                [t('veh.next_inspection'), vehicle.next_inspection],
+              ].map(([label, date]) => (
+                <div key={String(label)}>
+                  <p className="text-xs text-text-muted">{label}</p>
+                  <ExpiryCell dateStr={String(date ?? '')} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Client section */}
+          {vehicle.client && (
+            <div className="rounded-10 border border-accent-soft p-4">
+              <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
+                {t('veh.section_client')}
+              </h4>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-mono bg-accent-soft text-primary px-2 py-0.5 rounded-full">
+                  {vehicle.client.id}
+                </span>
+                <span className="font-medium text-sm">{clientDisplayName(vehicle.client)}</span>
+              </div>
+              {vehicle.client.email && <p className="text-xs text-text-muted">{vehicle.client.email}</p>}
+              {vehicle.client.country && <p className="text-xs text-text-muted">{vehicle.client.country}</p>}
             </div>
           )}
         </div>
@@ -907,9 +946,7 @@ function AddVehicleModal({
 
   const validate = () => {
     const errs: Partial<Record<keyof VehicleFormData, string>> = {};
-    if (!form.plate.trim()) errs.plate = t('form.required');
-    if (!form.make.trim()) errs.make = t('form.required');
-    if (!form.model.trim()) errs.model = t('form.required');
+    if (!form.registration_number.trim()) errs.registration_number = t('form.required');
     if (!form.current_km || isNaN(Number(form.current_km))) errs.current_km = t('form.required');
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -966,12 +1003,22 @@ export default function Vehicles({ t }: VehiclesProps) {
   const [leasingCompanies, setLeasingCompanies] = useState<string[]>([]);
   const [insuranceCompanies, setInsuranceCompanies] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Filter state
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [ownershipFilter, setOwnershipFilter] = useState<OwnershipFilter>('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [insuranceFilter, setInsuranceFilter] = useState('');
+  const [leasingFilter, setLeasingFilter] = useState('');
+  const [countryFilter, setCountryFilter] = useState('');
+
+  // Sort state
+  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+
+  // Modal/drawer state
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [drawerVehicle, setDrawerVehicle] = useState<Vehicle | null>(null);
-  const [drawerInitialTab, setDrawerInitialTab] = useState<DrawerTab>('details');
+  const [detailVehicle, setDetailVehicle] = useState<Vehicle | null>(null);
+  const [editVehicle, setEditVehicle] = useState<Vehicle | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -980,9 +1027,13 @@ export default function Vehicles({ t }: VehiclesProps) {
       const [vehiclesRes, clientsRes, leasingRes, insuranceRes] = await Promise.all([
         supabase
           .from('vehicles')
-          .select(`*, client:clients(id, company_name, email, country)`)
-          .order('created_at', { ascending: false }),
-        supabase.from('clients').select('*').eq('is_client', true).order('company_name'),
+          .select(`*, client:clients(id, company_name, company_name_additional, email, country)`)
+          .order('registration_number', { ascending: true }),
+        supabase
+          .from('clients')
+          .select('id, company_name, company_name_additional, email, country')
+          .eq('is_client', true)
+          .order('company_name_additional', { ascending: true }),
         supabase.from('vehicles').select('leasing_company').not('leasing_company', 'is', null),
         supabase.from('vehicles').select('insurance_company').not('insurance_company', 'is', null),
       ]);
@@ -993,10 +1044,10 @@ export default function Vehicles({ t }: VehiclesProps) {
       setVehicles((vehiclesRes.data as Vehicle[]) || []);
       setClients((clientsRes.data as Client[]) || []);
       setLeasingCompanies(
-        [...new Set((leasingRes.data || []).map((v: { leasing_company: string }) => v.leasing_company).filter(Boolean))]
+        [...new Set((leasingRes.data || []).map((v: { leasing_company: string }) => v.leasing_company).filter(Boolean))].sort()
       );
       setInsuranceCompanies(
-        [...new Set((insuranceRes.data || []).map((v: { insurance_company: string }) => v.insurance_company).filter(Boolean))]
+        [...new Set((insuranceRes.data || []).map((v: { insurance_company: string }) => v.insurance_company).filter(Boolean))].sort()
       );
     } catch {
       toast.error(t('error.fetch_failed'));
@@ -1005,21 +1056,75 @@ export default function Vehicles({ t }: VehiclesProps) {
     }
   }, [t]);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  const filtered = vehicles.filter((v) => {
-    const matchesSearch =
-      search === '' ||
-      v.plate.toLowerCase().includes(search.toLowerCase()) ||
-      v.make.toLowerCase().includes(search.toLowerCase()) ||
-      v.model.toLowerCase().includes(search.toLowerCase()) ||
-      (v.client?.company_name || '').toLowerCase().includes(search.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || v.status === statusFilter;
-    const matchesOwnership = ownershipFilter === 'all' || v.ownership_status === ownershipFilter;
-    return matchesSearch && matchesStatus && matchesOwnership;
-  });
+  // Derived distinct values for dropdowns
+  const distinctCountries = useMemo(
+    () => [...new Set(vehicles.map(v => v.vehicle_country).filter(Boolean) as string[])].sort(),
+    [vehicles]
+  );
+  const distinctInsurance = useMemo(
+    () => [...new Set(vehicles.map(v => v.insurance_company).filter(Boolean) as string[])].sort(),
+    [vehicles]
+  );
+  const distinctLeasing = useMemo(
+    () => [...new Set(vehicles.map(v => v.leasing_company).filter(Boolean) as string[])].sort(),
+    [vehicles]
+  );
+
+  const resetFilters = () => {
+    setSearch('');
+    setOwnershipFilter('all');
+    setStatusFilter('all');
+    setInsuranceFilter('');
+    setLeasingFilter('');
+    setCountryFilter('');
+    setSortConfig(null);
+  };
+
+  const hasActiveFilters =
+    search !== '' ||
+    ownershipFilter !== 'all' ||
+    statusFilter !== 'all' ||
+    insuranceFilter !== '' ||
+    leasingFilter !== '' ||
+    countryFilter !== '';
+
+  // Filtered + sorted vehicles
+  const filtered = useMemo(() => {
+    let result = vehicles.filter((v) => {
+      const q = search.toLowerCase();
+      const matchesSearch =
+        !q ||
+        v.registration_number.toLowerCase().includes(q) ||
+        (v.vehicle_name ?? '').toLowerCase().includes(q) ||
+        (v.client ? clientDisplayName(v.client) : '').toLowerCase().includes(q);
+      const matchesStatus = statusFilter === 'all' || v.status === statusFilter;
+      const matchesOwnership = ownershipFilter === 'all' || v.ownership_status === ownershipFilter;
+      const matchesInsurance = !insuranceFilter || v.insurance_company === insuranceFilter;
+      const matchesLeasing = !leasingFilter || v.leasing_company === leasingFilter;
+      const matchesCountry = !countryFilter || v.vehicle_country === countryFilter;
+      return matchesSearch && matchesStatus && matchesOwnership && matchesInsurance && matchesLeasing && matchesCountry;
+    });
+
+    if (sortConfig) {
+      result = [...result].sort((a, b) => {
+        const aVal = getSortValue(a, sortConfig.key);
+        const bVal = getSortValue(b, sortConfig.key);
+        if (aVal === null || aVal === undefined) return 1;
+        if (bVal === null || bVal === undefined) return -1;
+        let cmp = 0;
+        if (typeof aVal === 'string' && typeof bVal === 'string') {
+          cmp = aVal.localeCompare(bVal);
+        } else {
+          cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+        }
+        return sortConfig.dir === 'asc' ? cmp : -cmp;
+      });
+    }
+
+    return result;
+  }, [vehicles, search, statusFilter, ownershipFilter, insuranceFilter, leasingFilter, countryFilter, sortConfig]);
 
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -1027,7 +1132,8 @@ export default function Vehicles({ t }: VehiclesProps) {
       const { error } = await supabase.from('vehicles').delete().eq('id', deleteId);
       if (error) throw error;
       toast.success(t('btn.delete'));
-      if (drawerVehicle?.id === deleteId) setDrawerVehicle(null);
+      if (detailVehicle?.id === deleteId) setDetailVehicle(null);
+      if (editVehicle?.id === deleteId) setEditVehicle(null);
       fetchData();
     } catch {
       toast.error(t('error.generic'));
@@ -1036,36 +1142,62 @@ export default function Vehicles({ t }: VehiclesProps) {
     }
   };
 
-  const openDrawer = (vehicle: Vehicle, tab: DrawerTab = 'details') => {
-    setDrawerInitialTab(tab);
-    setDrawerVehicle(vehicle);
+  const handleSort = (key: string) => {
+    setSortConfig(prev => {
+      if (!prev || prev.key !== key) return { key, dir: 'asc' };
+      if (prev.dir === 'asc') return { key, dir: 'desc' };
+      return null;
+    });
   };
 
-  // Column group header style helpers
-  const grpVehicle = { backgroundColor: 'white' };
-  const grpLeasing = { backgroundColor: 'var(--color-accent-soft)', color: 'var(--color-primary)' };
-  const grpInsurance = { backgroundColor: '#dbeafe', color: '#1e40af' };
-  const grpFinancial = { backgroundColor: '#fef3c7', color: '#92400e' };
-  const grpExpiry = { backgroundColor: '#ede9fe', color: '#5b21b6' };
+  // Table style helpers
+  const th = (_group: 'white' | 'green' | 'blue' | 'amber' | 'purple', _sticky?: 'left' | 'right') => {
+    return 'text-xs font-medium text-text-muted uppercase tracking-wide px-3 py-2 whitespace-nowrap border-b border-accent-muted cursor-pointer select-none text-left';
+  };
 
-  const thGrp = 'text-xs font-semibold uppercase tracking-wider px-3 py-2 text-center border-b border-accent-muted';
-  const thCol = 'text-xs font-semibold text-text-muted uppercase tracking-wider px-3 py-2 text-left bg-bg whitespace-nowrap';
+  const thStyle = (group: 'white' | 'green' | 'blue' | 'amber' | 'purple', extra?: React.CSSProperties): React.CSSProperties => {
+    const bg = {
+      white: 'white',
+      green: 'var(--color-accent-soft)',
+      blue: '#dbeafe',
+      amber: '#fef3c7',
+      purple: '#ede9fe',
+    }[group];
+    return { backgroundColor: bg, ...extra };
+  };
+
+  const SortIcon = ({ colKey }: { colKey: string }) => {
+    if (sortConfig?.key !== colKey) return null;
+    return sortConfig.dir === 'asc'
+      ? <ChevronUp size={10} strokeWidth={2} className="inline ml-0.5" />
+      : <ChevronDown size={10} strokeWidth={2} className="inline ml-0.5" />;
+  };
+
   const td = 'px-3 text-xs text-text-dark whitespace-nowrap';
   const tdMuted = 'px-3 text-xs text-text-muted whitespace-nowrap italic';
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h2 className="page-title">{t('vehicles.title')}</h2>
-        <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={() => setAddModalOpen(true)} className="btn-primary flex items-center gap-2 whitespace-nowrap">
+          <Plus size={14} strokeWidth={2} />
+          {t('btn.add_vehicle')}
+        </button>
+      </div>
+
+      {/* Filter bar */}
+      <div className="card px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search */}
           <SearchInput
             value={search}
             onChange={setSearch}
             placeholder={t('vehicles.search_placeholder')}
           />
 
-          {/* Ownership filter */}
+          {/* Ownership pills */}
           <div className="flex gap-1 bg-bg border border-accent-muted rounded-10 p-1">
             {([
               { key: 'all' as OwnershipFilter, label: t('vehicles.filter_all') },
@@ -1075,7 +1207,7 @@ export default function Vehicles({ t }: VehiclesProps) {
               <button
                 key={key}
                 onClick={() => setOwnershipFilter(key)}
-                className={`px-3 py-1 rounded-10 text-xs font-medium transition-colors duration-150 ${
+                className={`px-3 py-1 rounded-10 text-xs font-medium transition-colors ${
                   ownershipFilter === key
                     ? key === 'LEASING'
                       ? 'bg-accent-soft text-primary'
@@ -1091,11 +1223,11 @@ export default function Vehicles({ t }: VehiclesProps) {
             ))}
           </div>
 
-          {/* Status filter */}
+          {/* Status */}
           <select
             className="input-field !py-1.5 !px-2 text-xs w-auto"
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            onChange={(e) => setStatusFilter(e.target.value)}
           >
             <option value="all">{t('vehicles.filter_all')}</option>
             <option value="active">{t('vehicles.filter_active')}</option>
@@ -1103,10 +1235,57 @@ export default function Vehicles({ t }: VehiclesProps) {
             <option value="returning">{t('vehicles.filter_returning')}</option>
           </select>
 
-          <button onClick={() => setAddModalOpen(true)} className="btn-primary flex items-center gap-2 whitespace-nowrap">
-            <Plus size={14} strokeWidth={2} />
-            {t('btn.add_vehicle')}
-          </button>
+          {/* Insurance company */}
+          {distinctInsurance.length > 0 && (
+            <select
+              className="input-field !py-1.5 !px-2 text-xs w-auto"
+              value={insuranceFilter}
+              onChange={(e) => setInsuranceFilter(e.target.value)}
+            >
+              <option value="">{t('veh.insurance_section')}: {t('vehicles.filter_all')}</option>
+              {distinctInsurance.map(ins => (
+                <option key={ins} value={ins}>{ins}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Leasing company */}
+          {distinctLeasing.length > 0 && (
+            <select
+              className="input-field !py-1.5 !px-2 text-xs w-auto"
+              value={leasingFilter}
+              onChange={(e) => setLeasingFilter(e.target.value)}
+            >
+              <option value="">{t('veh.section_leasing')}: {t('vehicles.filter_all')}</option>
+              {distinctLeasing.map(l => (
+                <option key={l} value={l}>{l}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Country */}
+          {distinctCountries.length > 0 && (
+            <select
+              className="input-field !py-1.5 !px-2 text-xs w-auto"
+              value={countryFilter}
+              onChange={(e) => setCountryFilter(e.target.value)}
+            >
+              <option value="">{t('veh.vehicle_country')}: {t('vehicles.filter_all')}</option>
+              {distinctCountries.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Reset */}
+          {hasActiveFilters && (
+            <button
+              onClick={resetFilters}
+              className="text-xs text-text-muted hover:text-danger transition-colors underline underline-offset-2"
+            >
+              {t('veh.reset_filters')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1114,7 +1293,7 @@ export default function Vehicles({ t }: VehiclesProps) {
       <div className="card overflow-hidden">
         {loading ? (
           <div className="p-4 space-y-2">
-            {[...Array(3)].map((_, i) => (
+            {[...Array(4)].map((_, i) => (
               <div key={i} className="h-11 rounded-10 bg-accent-soft/40 animate-pulse" />
             ))}
           </div>
@@ -1125,51 +1304,79 @@ export default function Vehicles({ t }: VehiclesProps) {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse" style={{ minWidth: '1400px' }}>
-              {/* Column group headers */}
+            <table className="w-full border-collapse" style={{ minWidth: '1600px' }}>
               <thead>
                 <tr>
-                  <th colSpan={5} className={thGrp} style={grpVehicle}>{t('veh.section_vehicle')}</th>
-                  <th colSpan={4} className={thGrp} style={grpLeasing}>{t('veh.section_leasing')}</th>
-                  <th colSpan={4} className={thGrp} style={grpInsurance}>{t('veh.insurance_section')}</th>
-                  <th colSpan={4} className={thGrp} style={grpFinancial}>{t('veh.section_financial')}</th>
-                  <th colSpan={3} className={thGrp} style={grpExpiry}>{t('veh.section_expiry')}</th>
-                  <th className={thGrp} style={grpVehicle}></th>
-                </tr>
-                <tr>
-                  {/* Veicolo */}
-                  <th className={thCol} style={{ position: 'sticky', left: 0, zIndex: 2, backgroundColor: 'var(--color-bg)' }}>
-                    {t('vehicles.plate')}
-                  </th>
-                  <th className={thCol} style={{ position: 'sticky', left: 96, zIndex: 2, backgroundColor: 'var(--color-bg)' }}>
-                    {t('vehicles.make')}/{t('vehicles.model')}
-                  </th>
-                  <th className={thCol}>{t('vehicles.year')}/{t('vehicles.current_km')}</th>
-                  <th className={thCol}>{t('vehicles.status')}</th>
-                  <th className={thCol}>{t('veh.ownership_status')}</th>
-                  {/* Leasing */}
-                  <th className={thCol}>{t('veh.leasing_company')}</th>
-                  <th className={thCol}>{t('veh.contract_number')}</th>
-                  <th className={thCol}>{t('veh.lease_installment')} (€)</th>
-                  <th className={thCol}>{t('veh.received_installment')} (€)</th>
-                  {/* Insurance */}
-                  <th className={thCol}>{t('veh.insurance_company')}</th>
-                  <th className={thCol}>{t('veh.insurance_expiry')}</th>
-                  <th className={thCol}>{t('veh.annual_insurance_cost')} (€)</th>
-                  <th className={thCol}>{t('veh.monthly_insurance')} (€)</th>
-                  {/* Financial */}
-                  <th className={thCol}>{t('veh.deposit')} (€)</th>
-                  <th className={thCol}>{t('veh.lease_months')}</th>
-                  <th className={thCol}>{t('veh.deposit_per_month')} (€)</th>
-                  <th className={thCol}>{t('veh.profit_difference')} (€)</th>
-                  {/* Scadenze */}
-                  <th className={thCol}>{t('veh.registration_expiry')}</th>
-                  <th className={thCol}>{t('veh.next_inspection')}</th>
-                  <th className={thCol}>{t('vehicles.client')}</th>
-                  {/* Actions */}
+                  {/* Targa – sticky left */}
                   <th
-                    className={thCol}
-                    style={{ position: 'sticky', right: 0, zIndex: 2, backgroundColor: 'var(--color-bg)' }}
+                    className={th('white', 'left')}
+                    style={thStyle('white', { position: 'sticky', left: 0, zIndex: 3 })}
+                    onClick={() => handleSort('registration_number')}
+                  >
+                    {t('vehicles.registration_number')} <SortIcon colKey="registration_number" />
+                  </th>
+                  {/* Veicolo */}
+                  <th className={th('white')} style={thStyle('white')} onClick={() => handleSort('vehicle_name')}>
+                    {t('vehicles.vehicle_name')} <SortIcon colKey="vehicle_name" />
+                  </th>
+                  {/* Stato */}
+                  <th className={th('white')} style={thStyle('white')} onClick={() => handleSort('status')}>
+                    {t('vehicles.status')} <SortIcon colKey="status" />
+                  </th>
+                  {/* Proprietà */}
+                  <th className={th('white')} style={thStyle('white')} onClick={() => handleSort('ownership_status')}>
+                    {t('veh.ownership_status')} <SortIcon colKey="ownership_status" />
+                  </th>
+                  {/* Leasing group */}
+                  <th className={th('green')} style={thStyle('green')} onClick={() => handleSort('leasing_company')}>
+                    {t('veh.leasing_company')} <SortIcon colKey="leasing_company" />
+                  </th>
+                  <th className={th('green')} style={thStyle('green')} onClick={() => handleSort('contract_number')}>
+                    {t('veh.contract_number')} <SortIcon colKey="contract_number" />
+                  </th>
+                  <th className={th('green')} style={thStyle('green')} onClick={() => handleSort('lease_installment')}>
+                    {t('veh.lease_installment')} <SortIcon colKey="lease_installment" />
+                  </th>
+                  <th className={th('green')} style={thStyle('green')} onClick={() => handleSort('received_installment')}>
+                    {t('veh.received_installment')} <SortIcon colKey="received_installment" />
+                  </th>
+                  {/* Insurance group */}
+                  <th className={th('blue')} style={thStyle('blue')} onClick={() => handleSort('insurance_company')}>
+                    {t('veh.insurance_company')} <SortIcon colKey="insurance_company" />
+                  </th>
+                  <th className={th('blue')} style={thStyle('blue')} onClick={() => handleSort('insurance_expiry')}>
+                    {t('veh.insurance_expiry')} <SortIcon colKey="insurance_expiry" />
+                  </th>
+                  <th className={th('blue')} style={thStyle('blue')} onClick={() => handleSort('monthly_insurance')}>
+                    {t('veh.monthly_insurance')} <SortIcon colKey="monthly_insurance" />
+                  </th>
+                  {/* Financial group */}
+                  <th className={th('amber')} style={thStyle('amber')} onClick={() => handleSort('deposit')}>
+                    {t('veh.deposit')} <SortIcon colKey="deposit" />
+                  </th>
+                  <th className={th('amber')} style={thStyle('amber')} onClick={() => handleSort('lease_months')}>
+                    {t('veh.lease_months')} <SortIcon colKey="lease_months" />
+                  </th>
+                  <th className={th('amber')} style={thStyle('amber')} onClick={() => handleSort('deposit_per_month')}>
+                    {t('veh.deposit_per_month')} <SortIcon colKey="deposit_per_month" />
+                  </th>
+                  <th className={th('amber')} style={thStyle('amber')} onClick={() => handleSort('profit_difference')}>
+                    {t('veh.profit_difference')} <SortIcon colKey="profit_difference" />
+                  </th>
+                  {/* Scadenze group */}
+                  <th className={th('purple')} style={thStyle('purple')} onClick={() => handleSort('registration_expiry')}>
+                    {t('veh.registration_expiry')} <SortIcon colKey="registration_expiry" />
+                  </th>
+                  <th className={th('purple')} style={thStyle('purple')} onClick={() => handleSort('next_inspection')}>
+                    {t('veh.next_inspection')} <SortIcon colKey="next_inspection" />
+                  </th>
+                  <th className={th('purple')} style={thStyle('purple')} onClick={() => handleSort('client')}>
+                    {t('vehicles.client')} <SortIcon colKey="client" />
+                  </th>
+                  {/* Actions – sticky right */}
+                  <th
+                    className={th('white', 'right')}
+                    style={thStyle('white', { position: 'sticky', right: 0, zIndex: 3 })}
                   >
                     {t('vehicles.actions')}
                   </th>
@@ -1179,85 +1386,73 @@ export default function Vehicles({ t }: VehiclesProps) {
               <tbody>
                 {filtered.map((v) => {
                   const isProprieta = v.ownership_status === "PROPRIETA'";
-                  const rowBg = isProprieta ? '#f0f9ff' : undefined;
-                  const stickyBg = isProprieta ? '#f0f9ff' : 'white';
-                  const { depPerMonth: dp, monthlyIns: mi } = computeValues(vehicleToForm(v));
+                  const stickyBg = isProprieta ? '#eff6ff' : 'white';
+                  const rowBg = isProprieta ? '#f5f9ff' : undefined;
 
                   return (
                     <tr
                       key={v.id}
-                      className="border-b border-accent-soft hover:brightness-95 cursor-pointer transition-all"
-                      style={{ height: '44px', backgroundColor: rowBg }}
-                      onClick={() => openDrawer(v, 'details')}
+                      className="border-b border-accent-soft hover:brightness-[0.97] cursor-pointer transition-all"
+                      style={{ height: '42px', backgroundColor: rowBg }}
+                      onClick={() => setDetailVehicle(v)}
                     >
-                      {/* Plate – sticky */}
+                      {/* Targa – sticky left */}
                       <td
                         className={`${td} font-mono font-bold text-primary`}
                         style={{ position: 'sticky', left: 0, zIndex: 1, backgroundColor: stickyBg }}
                       >
-                        {v.plate}
+                        {v.registration_number}
                       </td>
-                      {/* Make/Model – sticky */}
-                      <td
-                        className={td}
-                        style={{ position: 'sticky', left: 96, zIndex: 1, backgroundColor: stickyBg }}
-                      >
-                        <span className="font-medium">{v.make}</span>
-                        <span className="text-text-muted ml-1">{v.model}</span>
-                      </td>
-                      {/* Anno/KM */}
+                      {/* Veicolo */}
+                      <td className={td}>{v.vehicle_name || <span className="text-text-muted">—</span>}</td>
+                      {/* Stato */}
                       <td className={td}>
-                        {v.year || '—'} · {v.current_km.toLocaleString('it-IT')} km
+                        <Badge status={v.status ?? ''} t={(k) => t(k)} />
                       </td>
-                      {/* Status */}
-                      <td className={td}>
-                        <Badge status={v.status} t={(k) => t(k)} />
-                      </td>
-                      {/* Ownership */}
+                      {/* Proprietà */}
                       <td className={td}>
                         <OwnershipBadge status={v.ownership_status} t={t} />
                       </td>
-
-                      {/* Leasing group */}
+                      {/* Leasing */}
                       <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : (v.leasing_company || <span className="text-text-muted">—</span>)}</td>
                       <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : (v.contract_number || <span className="text-text-muted">—</span>)}</td>
                       <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : formatCurrency(v.lease_installment)}</td>
                       <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : formatCurrency(v.received_installment)}</td>
-
-                      {/* Insurance group */}
+                      {/* Insurance */}
                       <td className={td}>{v.insurance_company || <span className="text-text-muted">—</span>}</td>
                       <td className={td}><ExpiryCell dateStr={v.insurance_expiry} /></td>
-                      <td className={td}>{formatCurrency(v.annual_insurance_cost)}</td>
-                      <td className={tdMuted}>{mi !== null ? `= ${formatCurrency(mi)}` : '—'}</td>
-
-                      {/* Financial group */}
+                      <td className={tdMuted}>{v.monthly_insurance !== null ? `= ${formatCurrency(v.monthly_insurance)}` : '—'}</td>
+                      {/* Financial */}
                       <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : formatCurrency(v.deposit)}</td>
-                      <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : (v.lease_months || '—')}</td>
-                      <td className={tdMuted}>{dp !== null ? `= ${formatCurrency(dp)}` : '—'}</td>
-                      <td className={td}>
-                        <ProfitCell value={v.profit_difference} />
-                      </td>
-
-                      {/* Scadenze group */}
+                      <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : (v.lease_months ?? <span className="text-text-muted">—</span>)}</td>
+                      <td className={tdMuted}>{v.deposit_per_month !== null ? `= ${formatCurrency(v.deposit_per_month)}` : '—'}</td>
+                      <td className={td}><ProfitCell value={v.profit_difference} /></td>
+                      {/* Scadenze */}
                       <td className={td}><ExpiryCell dateStr={v.registration_expiry} /></td>
                       <td className={td}><ExpiryCell dateStr={v.next_inspection} /></td>
                       <td className={td}>
                         {v.client ? (
-                          <span className="text-text-dark">{v.client.company_name}</span>
+                          <span>{clientDisplayName(v.client)}</span>
                         ) : (
                           <span className="text-text-muted">—</span>
                         )}
                       </td>
-
                       {/* Actions – sticky right */}
                       <td
                         className={td}
                         style={{ position: 'sticky', right: 0, zIndex: 1, backgroundColor: stickyBg }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => openDrawer(v, 'edit')}
+                            onClick={() => setDetailVehicle(v)}
+                            className="text-text-muted hover:text-primary transition-colors"
+                            title={t('veh.detail_title')}
+                          >
+                            <Info size={14} strokeWidth={1.8} />
+                          </button>
+                          <button
+                            onClick={() => setEditVehicle(v)}
                             className="text-text-muted hover:text-primary transition-colors"
                             title={t('btn.edit')}
                           >
@@ -1281,19 +1476,31 @@ export default function Vehicles({ t }: VehiclesProps) {
         )}
       </div>
 
-      {/* Drawer */}
-      {drawerVehicle && (
-        <VehicleDrawer
-          key={`${drawerVehicle.id}-${drawerInitialTab}`}
-          vehicle={drawerVehicle}
-          initialTab={drawerInitialTab}
+      {/* Vehicle Detail Modal */}
+      {detailVehicle && (
+        <VehicleDetailModal
+          vehicle={detailVehicle}
+          t={t}
+          onClose={() => setDetailVehicle(null)}
+          onEdit={() => {
+            setEditVehicle(detailVehicle);
+            setDetailVehicle(null);
+          }}
+        />
+      )}
+
+      {/* Vehicle Edit Drawer */}
+      {editVehicle && (
+        <VehicleEditDrawer
+          key={editVehicle.id}
+          vehicle={editVehicle}
           clients={clients}
           leasingCompanies={leasingCompanies}
           insuranceCompanies={insuranceCompanies}
           t={t}
-          onClose={() => setDrawerVehicle(null)}
+          onClose={() => setEditVehicle(null)}
           onSaved={fetchData}
-          onDelete={(id) => { setDrawerVehicle(null); setDeleteId(id); }}
+          onDelete={(id) => { setEditVehicle(null); setDeleteId(id); }}
         />
       )}
 
