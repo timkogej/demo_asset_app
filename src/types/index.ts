@@ -139,6 +139,7 @@ export interface InvoiceItem {
   unit_price: number;
   total: number;
   line_type: 'item' | 'text' | 'subtotal' | 'space';
+  show_translation: boolean;
 }
 
 export interface InvoicePaymentSchedule {
@@ -217,4 +218,8 @@ export interface Settings {
   email_subject_sl: string | null;
   email_body_it: string | null;
   email_body_sl: string | null;
+  deepl_api_key: string | null;
+  deepl_webhook_url: string | null;
+  logo_manutecnica_url: string | null;
+  logo_varent_url: string | null;
 }

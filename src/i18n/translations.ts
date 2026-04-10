@@ -46,6 +46,9 @@ export const translations = {
       email_body_sl: 'Corpo email (SL)',
       logo_upload: 'Carica logo',
       logo_preview: 'Anteprima logo',
+      logo_manutecnica: 'Logo Manutecnica',
+      logo_varent: 'Logo Varent',
+      deepl_api_key: 'DeepL API Key (traduzione automatica)',
       placeholders: 'Variabili disponibili',
     },
     status: {
@@ -431,6 +434,9 @@ export const translations = {
       email_body_sl: 'Vsebina emaila (SL)',
       logo_upload: 'Naloži logo',
       logo_preview: 'Predogled loga',
+      logo_manutecnica: 'Logo Manutecnica',
+      logo_varent: 'Logo Varent',
+      deepl_api_key: 'DeepL API Key (avtomatski prevod)',
       placeholders: 'Razpoložljive spremenljivke',
     },
     status: {

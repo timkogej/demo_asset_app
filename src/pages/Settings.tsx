@@ -55,7 +55,10 @@ export default function Settings({ t }: SettingsProps) {
   const [saved, setSaved] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
+  const [logoManutecnicaUploading, setLogoManutecnicaUploading] = useState(false);
+  const [logoVarentUploading, setLogoVarentUploading] = useState(false);
   const [testingWebhook, setTestingWebhook] = useState(false);
+  const [showDeeplKey, setShowDeeplKey] = useState(false);
 
   const originalRef = useRef<Partial<Settings>>({});
 
@@ -86,6 +89,10 @@ export default function Settings({ t }: SettingsProps) {
     email_subject_sl: '',
     email_body_it: '',
     email_body_sl: '',
+    deepl_api_key: '',
+    deepl_webhook_url: '',
+    logo_manutecnica_url: '',
+    logo_varent_url: '',
   });
 
   const loadSettings = useCallback(async () => {
@@ -178,6 +185,35 @@ export default function Settings({ t }: SettingsProps) {
     }
   }
 
+  async function handleLogoUploadToPath(
+    file: File,
+    storagePath: string,
+    field: keyof Settings,
+    setUploading: (v: boolean) => void
+  ) {
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/svg+xml'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Allowed formats: PNG, JPG, SVG');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Max file size: 2 MB');
+      return;
+    }
+    setUploading(true);
+    try {
+      const { error: uploadError } = await supabase.storage
+        .from('invoice-pdfs')
+        .upload(storagePath, file, { upsert: true });
+      if (uploadError) throw uploadError;
+      handleChange(field, storagePath);
+    } catch {
+      toast.error('Logo upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function handleTestWebhook() {
     const url = form.n8n_webhook_url;
     if (!url) {
@@ -263,6 +299,94 @@ export default function Settings({ t }: SettingsProps) {
                       accept="image/png,image/jpeg,image/svg+xml"
                       className="hidden"
                       onChange={handleLogoUpload}
+                    />
+                  </label>
+                )}
+              </div>
+
+              {/* Logo Manutecnica */}
+              <div>
+                <FieldLabel text={t('settings.logo_manutecnica')} />
+                {form.logo_manutecnica_url ? (
+                  <div className="flex items-center gap-4">
+                    <img
+                      src={form.logo_manutecnica_url}
+                      alt="Logo Manutecnica"
+                      style={{ maxHeight: 50, maxWidth: 160, objectFit: 'contain' }}
+                      className="rounded border border-accent-soft bg-white p-1"
+                    />
+                    <label className="btn-secondary text-xs cursor-pointer">
+                      {logoManutecnicaUploading ? t('common.loading') : 'Sostituisci / Zamenjaj'}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/svg+xml"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleLogoUploadToPath(f, 'logos/manutecnica.jpg', 'logo_manutecnica_url', setLogoManutecnicaUploading);
+                        }}
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-accent-muted rounded-10 p-4 cursor-pointer hover:border-primary hover:bg-accent-soft/30 transition-colors">
+                    <Upload size={18} strokeWidth={1.8} className="text-text-muted" />
+                    <span className="text-sm text-text-muted">
+                      {logoManutecnicaUploading ? t('common.loading') : t('settings.logo_upload')}
+                    </span>
+                    <span className="text-xs text-text-muted">PNG, JPG — max 2 MB</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/svg+xml"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleLogoUploadToPath(f, 'logos/manutecnica.jpg', 'logo_manutecnica_url', setLogoManutecnicaUploading);
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+
+              {/* Logo Varent */}
+              <div>
+                <FieldLabel text={t('settings.logo_varent')} />
+                {form.logo_varent_url ? (
+                  <div className="flex items-center gap-4">
+                    <img
+                      src={form.logo_varent_url}
+                      alt="Logo Varent"
+                      style={{ maxHeight: 50, maxWidth: 160, objectFit: 'contain' }}
+                      className="rounded border border-accent-soft bg-white p-1"
+                    />
+                    <label className="btn-secondary text-xs cursor-pointer">
+                      {logoVarentUploading ? t('common.loading') : 'Sostituisci / Zamenjaj'}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/svg+xml"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleLogoUploadToPath(f, 'logos/varent.jpg', 'logo_varent_url', setLogoVarentUploading);
+                        }}
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-accent-muted rounded-10 p-4 cursor-pointer hover:border-primary hover:bg-accent-soft/30 transition-colors">
+                    <Upload size={18} strokeWidth={1.8} className="text-text-muted" />
+                    <span className="text-sm text-text-muted">
+                      {logoVarentUploading ? t('common.loading') : t('settings.logo_upload')}
+                    </span>
+                    <span className="text-xs text-text-muted">PNG, JPG — max 2 MB</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/svg+xml"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleLogoUploadToPath(f, 'logos/varent.jpg', 'logo_varent_url', setLogoVarentUploading);
+                      }}
                     />
                   </label>
                 )}
@@ -598,6 +722,45 @@ export default function Settings({ t }: SettingsProps) {
                 />
                 <p className="text-xs text-text-muted mt-1">
                   Ogni fattura inviata verrà copiata a questo indirizzo / Vsak poslan račun bo kopiran na ta naslov
+                </p>
+              </div>
+
+              {/* DeepL API Key */}
+              <div>
+                <FieldLabel text={t('settings.deepl_api_key')} />
+                <div className="relative">
+                  <input
+                    type={showDeeplKey ? 'text' : 'password'}
+                    className="input-field w-full pr-16"
+                    value={form.deepl_api_key ?? ''}
+                    onChange={(e) => handleChange('deepl_api_key', e.target.value)}
+                    placeholder="••••••••••••••••"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowDeeplKey((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-text-muted hover:text-primary"
+                  >
+                    {showDeeplKey ? 'Nascondi' : 'Mostra'}
+                  </button>
+                </div>
+                <p className="text-xs text-text-muted mt-1">
+                  Utilizzato per tradurre automaticamente le descrizioni nelle fatture / Uporablja se za samodejni prevod opisov na racunih
+                </p>
+              </div>
+
+              {/* DeepL Webhook URL */}
+              <div>
+                <FieldLabel text="DeepL Webhook URL (n8n)" />
+                <input
+                  type="text"
+                  className="input-field w-full"
+                  value={form.deepl_webhook_url ?? ''}
+                  onChange={(e) => handleChange('deepl_webhook_url', e.target.value)}
+                  placeholder="https://tikej.app.n8n.cloud/webhook/deepl-translate"
+                />
+                <p className="text-xs text-text-muted mt-1">
+                  URL n8n webhook za DeepL prevod opisov v fakturah / URL n8n webhook za DeepL prevod opisov v racunih
                 </p>
               </div>
 

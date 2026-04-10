@@ -70,6 +70,7 @@ interface FormItem {
   quantity: number;
   unit_price: number;
   line_type: 'item' | 'text' | 'space';
+  show_translation: boolean;
 }
 
 interface FormSchedule {
@@ -372,6 +373,51 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   // Track whether pdfBlobUrl is a local blob (needs revoke) or a signed URL (does not)
   const [previewIsBlob, setPreviewIsBlob] = useState(false);
 
+  // ---- shared: fetch full invoice with all relations ----
+
+  async function fetchFullInvoice(invoiceId: string): Promise<InvoiceRecord> {
+    const { data, error } = await supabase
+      .from('invoices')
+      .select(`
+        *,
+        client:clients(
+          id,
+          company_name,
+          company_name_additional,
+          email,
+          phone,
+          address,
+          postal_code,
+          city,
+          country,
+          tax_number,
+          registration_number,
+          is_vat_payer
+        ),
+        vehicle:vehicles(
+          id,
+          registration_number,
+          vehicle_name,
+          lease_start_date
+        ),
+        items:invoice_items(*),
+        payment_schedules:invoice_payment_schedules(*)
+      `)
+      .eq('id', invoiceId)
+      .single();
+    if (error || !data) throw new Error('Could not load invoice data');
+    const fullInvoice = data as unknown as InvoiceRecord;
+    if (fullInvoice.items) {
+      fullInvoice.items.sort((a, b) => a.sort_order - b.sort_order);
+    }
+    if (fullInvoice.payment_schedules) {
+      fullInvoice.payment_schedules.sort((a, b) =>
+        new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
+      );
+    }
+    return fullInvoice;
+  }
+
   // ---- preview ----
 
   async function openPreview(invoice: InvoiceRecord) {
@@ -379,27 +425,13 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     setPdfBlobUrl(null);
     setPdfLoading(true);
     try {
-      if (invoice.pdf_path) {
-        // PDF already uploaded — get a fresh signed URL (1 hour)
-        const { data, error } = await supabase.storage
-          .from('invoice-pdfs')
-          .createSignedUrl(invoice.pdf_path, 3600);
-        if (error || !data) throw new Error('Could not generate signed URL');
-        setPdfBlobUrl(data.signedUrl);
-        setPreviewIsBlob(false);
-      } else {
-        // No stored PDF — generate in browser with jsPDF
-        const { data: full } = await supabase
-          .from('invoices')
-          .select(`*, client:clients(*), vehicle:vehicles(*), items:invoice_items(*), payment_schedules:invoice_payment_schedules(*)`)
-          .eq('id', invoice.id)
-          .single();
-        const settings = await getSettings();
-        const blob = await generateInvoicePDF(full as InvoiceRecord, settings);
-        const url = URL.createObjectURL(blob);
-        setPdfBlobUrl(url);
-        setPreviewIsBlob(true);
-      }
+      // Always fetch fresh full invoice data so client/vehicle relations are complete
+      const full = await fetchFullInvoice(invoice.id);
+      const settings = await getSettings();
+      const blob = await generateInvoicePDF(full, settings);
+      const url = URL.createObjectURL(blob);
+      setPdfBlobUrl(url);
+      setPreviewIsBlob(true);
     } catch {
       toast.error(t('error.pdf_failed'));
     } finally {
@@ -418,29 +450,11 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
 
   async function handleDownload(invoice: InvoiceRecord) {
     try {
-      let blob: Blob;
+      // Always fetch fresh full invoice data so client/vehicle relations are complete
+      const full = await fetchFullInvoice(invoice.id);
+      const settings = await getSettings();
+      const blob = await generateInvoicePDF(full, settings);
       const filename = `Fattura_${invoice.invoice_number.replace('/', '-')}.pdf`;
-
-      if (invoice.pdf_path) {
-        // PDF already stored — get signed URL (60s is enough to start download)
-        const { data, error } = await supabase.storage
-          .from('invoice-pdfs')
-          .createSignedUrl(invoice.pdf_path, 60);
-        if (error || !data) throw new Error('Could not generate signed URL');
-        const resp = await fetch(data.signedUrl);
-        if (!resp.ok) throw new Error('Download failed');
-        blob = await resp.blob();
-      } else {
-        // No stored PDF — generate in browser
-        const { data: full } = await supabase
-          .from('invoices')
-          .select(`*, client:clients(*), vehicle:vehicles(*), items:invoice_items(*), payment_schedules:invoice_payment_schedules(*)`)
-          .eq('id', invoice.id)
-          .single();
-        const settings = await getSettings();
-        blob = await generateInvoicePDF(full as InvoiceRecord, settings);
-      }
-
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -483,15 +497,12 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       return;
     }
 
-    const { data: full } = await supabase
-      .from('invoices')
-      .select(`*, client:clients(*), vehicle:vehicles(*), items:invoice_items(*), payment_schedules:invoice_payment_schedules(*)`)
-      .eq('id', invoiceId)
-      .single();
+    // Fetch fresh full invoice data so client/vehicle relations are complete
+    const full = await fetchFullInvoice(invoiceId);
 
     // Generate & upload PDF
-    const pdfBlob = await generateInvoicePDF(full as InvoiceRecord, settings);
-    const pdfPath = `invoices/${(full as InvoiceRecord).invoice_year}/${(full as InvoiceRecord).invoice_number.replace('/', '-')}.pdf`;
+    const pdfBlob = await generateInvoicePDF(full, settings);
+    const pdfPath = `invoices/${full.invoice_year}/${full.invoice_number.replace('/', '-')}.pdf`;
 
     const { error: uploadError } = await supabase.storage
       .from('invoice-pdfs')
@@ -510,20 +521,19 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
 
     // Call n8n webhook
     if (!settings.n8n_webhook_url.includes('YOUR_WEBHOOK')) {
-      const inv = full as InvoiceRecord;
-      const clientName = inv.client ? clientDisplayName(inv.client as Client) : '';
+      const clientName = full.client ? clientDisplayName(full.client as Client) : '';
       const payload = {
-        invoice_id: inv.id,
-        invoice_number: inv.invoice_number,
+        invoice_id: full.id,
+        invoice_number: full.invoice_number,
         pdf_path: pdfPath, // storage path — n8n generates its own signed URL
-        client_email: inv.client?.email,
+        client_email: full.client?.email,
         client_name: clientName,
-        vehicle_name: inv.vehicle?.vehicle_name ?? '',
-        registration_number: inv.vehicle?.registration_number ?? '',
-        total_amount: inv.total,
-        due_date: inv.due_date ? formatDate(inv.due_date) : '',
-        language: inv.language ?? 'it',
-        service_period: inv.service_period ?? '',
+        vehicle_name: full.vehicle?.vehicle_name ?? '',
+        registration_number: full.vehicle?.registration_number ?? '',
+        total_amount: full.total,
+        due_date: full.due_date ? formatDate(full.due_date) : '',
+        language: full.language ?? 'it',
+        service_period: full.service_period ?? '',
       };
       console.log('Sending webhook payload:', payload);
       try {
@@ -647,33 +657,33 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   ): FormItem[] {
     if (type === 'monthly_rent') {
       return [
-        { id: newItemId(), code: '', description: contractRefIt, quantity: 1, unit_price: 0, line_type: 'text' },
-        { id: newItemId(), code: '', description: contractRefSl, quantity: 1, unit_price: 0, line_type: 'text' },
-        { id: newItemId(), code: '', description: 'NOLEGGIO LUNGO TERMINE', quantity: 1, unit_price: 0, line_type: 'text' },
-        { id: newItemId(), code: '', description: vehicleName, quantity: 1, unit_price: 0, line_type: 'text' },
-        { id: newItemId(), code: '', description: regNumber ? `TARGA ${regNumber}` : '', quantity: 1, unit_price: 0, line_type: 'text' },
-        { id: newItemId(), code: '', description: servicePeriod ? `CANONE MESE DI ${servicePeriod.toUpperCase()}` : 'CANONE MENSILE', quantity: 1, unit_price: unitPrice, line_type: 'item' },
-        { id: newItemId(), code: '', description: isRC ? 'DDV v skladu S 1. Odstavkom 25. clena ZDDV-1 obracunan\nReverse Charge' : '', quantity: 1, unit_price: 0, line_type: 'text' },
+        { id: newItemId(), code: '', description: contractRefIt, quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
+        { id: newItemId(), code: '', description: contractRefSl, quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
+        { id: newItemId(), code: '', description: 'NOLEGGIO LUNGO TERMINE', quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
+        { id: newItemId(), code: '', description: vehicleName, quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
+        { id: newItemId(), code: '', description: regNumber ? `TARGA ${regNumber}` : '', quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
+        { id: newItemId(), code: '', description: servicePeriod ? `CANONE MESE DI ${servicePeriod.toUpperCase()}` : 'CANONE MENSILE', quantity: 1, unit_price: unitPrice, line_type: 'item', show_translation: true },
+        { id: newItemId(), code: '', description: isRC ? 'DDV v skladu S 1. Odstavkom 25. clena ZDDV-1 obracunan\nReverse Charge' : '', quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
       ];
     }
     if (type === 'deposit') {
       return [
-        { id: newItemId(), code: '', description: 'ANTICIPO CONTRATTUALE', quantity: 1, unit_price: unitPrice, line_type: 'item' },
+        { id: newItemId(), code: '', description: 'ANTICIPO CONTRATTUALE', quantity: 1, unit_price: unitPrice, line_type: 'item', show_translation: true },
       ];
     }
     if (type === 'penalties') {
       return [
-        { id: newItemId(), code: '', description: 'ADDEBITO CONTRAVVENZIONI', quantity: 1, unit_price: unitPrice, line_type: 'item' },
+        { id: newItemId(), code: '', description: 'ADDEBITO CONTRAVVENZIONI', quantity: 1, unit_price: unitPrice, line_type: 'item', show_translation: true },
       ];
     }
     if (type === 'insurance') {
       return [
-        { id: newItemId(), code: '', description: 'ADDEBITO ASSICURAZIONE', quantity: 1, unit_price: unitPrice, line_type: 'item' },
+        { id: newItemId(), code: '', description: 'ADDEBITO ASSICURAZIONE', quantity: 1, unit_price: unitPrice, line_type: 'item', show_translation: true },
       ];
     }
     if (type === 'damage') {
       return [
-        { id: newItemId(), code: '', description: 'RISARCIMENTO DANNI', quantity: 1, unit_price: unitPrice, line_type: 'item' },
+        { id: newItemId(), code: '', description: 'RISARCIMENTO DANNI', quantity: 1, unit_price: unitPrice, line_type: 'item', show_translation: true },
       ];
     }
     return [];
@@ -745,7 +755,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   // live totals
   const formItems = form.items.map((i) => ({
     ...i, id: i.id, invoice_id: '', sort_order: 0, code: i.code || null, total: i.quantity * i.unit_price,
-    line_type: i.line_type,
+    line_type: i.line_type, show_translation: i.show_translation,
   } as InvoiceItem));
 
   const getFormSettings = async (): Promise<Settings> => getSettings();
@@ -859,6 +869,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
           line_type: item.line_type,
           quantity: item.quantity,
           unit_price: item.unit_price,
+          show_translation: item.show_translation,
         }))
       );
 
@@ -930,6 +941,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
           line_type: item.line_type,
           quantity: item.quantity,
           unit_price: item.unit_price,
+          show_translation: item.show_translation,
         }))
       );
 
@@ -1532,6 +1544,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                           <th className="text-right py-2 pr-2 text-xs font-medium text-text-muted w-24">{t('inv.unit_price')}</th>
                           <th className="text-right py-2 pr-2 text-xs font-medium text-text-muted w-24">{t('inv.item_total')}</th>
                           <th className="text-center py-2 pr-2 text-xs font-medium text-text-muted w-20">Tipo</th>
+                          <th className="text-center py-2 pr-2 text-xs font-medium text-text-muted w-8" title="Mostra traduzione / Pokazi prevod">TR</th>
                           <th className="w-8" />
                         </tr>
                       </thead>
@@ -1595,6 +1608,25 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                                 <option value="space">Spazio</option>
                               </select>
                             </td>
+                            <td className="py-1.5 pr-2 text-center">
+                              {(item.line_type === 'item' || item.line_type === 'text') && (
+                                <button
+                                  type="button"
+                                  title={item.show_translation ? 'Nascondi traduzione / Skrij prevod' : 'Mostra traduzione / Pokazi prevod'}
+                                  onClick={() => setForm((f) => ({
+                                    ...f,
+                                    items: f.items.map((i) => i.id === item.id ? { ...i, show_translation: !i.show_translation } : i),
+                                  }))}
+                                  className={`p-1 rounded text-xs font-medium transition-colors ${
+                                    item.show_translation
+                                      ? 'bg-primary/10 text-primary'
+                                      : 'bg-gray-100 text-text-muted'
+                                  }`}
+                                >
+                                  {item.show_translation ? '🌐' : '—'}
+                                </button>
+                              )}
+                            </td>
                             <td className="py-1.5">
                               <div className="flex flex-col gap-0.5">
                                 <button
@@ -1640,7 +1672,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                   <button
                     onClick={() => setForm((f) => ({
                       ...f,
-                      items: [...f.items, { id: newItemId(), code: '', description: '', quantity: 1, unit_price: 0, line_type: 'item' }],
+                      items: [...f.items, { id: newItemId(), code: '', description: '', quantity: 1, unit_price: 0, line_type: 'item', show_translation: true }],
                     }))}
                     className="btn-secondary text-sm flex items-center gap-1.5"
                   >
