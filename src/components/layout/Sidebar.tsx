@@ -7,11 +7,16 @@ import {
   CreditCard,
   BarChart2,
   FolderOpen,
+  Settings,
+  FileText,
   ChevronLeft,
   ChevronRight,
   X,
+  LogOut,
+  User,
 } from 'lucide-react';
 import type { Language } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 
 interface SidebarProps {
   language: Language;
@@ -27,10 +32,15 @@ const navItems = [
   { path: '/', label: 'nav.dashboard', icon: LayoutDashboard, end: true },
   { path: '/vehicles', label: 'nav.vehicles', icon: Car, end: false },
   { path: '/clients', label: 'nav.clients', icon: Users, end: false },
+  { path: '/invoices', label: 'nav.invoices', icon: FileText, end: false },
   { path: '/penalties', label: 'nav.penalties', icon: AlertTriangle, end: false },
   { path: '/payments', label: 'nav.payments', icon: CreditCard, end: false },
   { path: '/analytics', label: 'nav.analytics', icon: BarChart2, end: false },
   { path: '/documents', label: 'nav.documents', icon: FolderOpen, end: false },
+];
+
+const bottomNavItems = [
+  { path: '/settings', label: 'nav.settings', icon: Settings, end: false },
 ];
 
 export default function Sidebar({
@@ -43,6 +53,7 @@ export default function Sidebar({
   onCloseMobile,
 }: SidebarProps) {
   const sidebarWidth = collapsed ? 64 : 240;
+  const { username, signOut } = useAuth();
 
   return (
     <aside
@@ -112,6 +123,51 @@ export default function Sidebar({
           ))}
         </ul>
       </nav>
+
+      {/* Bottom nav items (Settings) */}
+      <div className="px-2 pb-1">
+        <ul className="space-y-0.5">
+          {bottomNavItems.map(({ path, label, icon: Icon, end }) => (
+            <li key={path}>
+              <NavLink
+                to={path}
+                end={end}
+                onClick={onCloseMobile}
+                title={collapsed ? t(label) : undefined}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2.5 rounded-10 text-sm font-medium transition-all duration-150 ${
+                    collapsed ? 'justify-center' : ''
+                  } ${
+                    isActive
+                      ? 'bg-accent-soft text-primary border-l-[3px] border-primary pl-[9px]'
+                      : 'text-text-muted hover:bg-accent-soft/50 hover:text-text-dark border-l-[3px] border-transparent pl-[9px]'
+                  }`
+                }
+              >
+                <Icon size={17} strokeWidth={1.8} />
+                {!collapsed && <span>{t(label)}</span>}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* User / Logout */}
+      <div className={`px-3 py-3 border-t border-accent-soft flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
+        {!collapsed && (
+          <div className="flex items-center gap-2 min-w-0">
+            <User size={16} strokeWidth={1.5} className="text-text-muted flex-shrink-0" />
+            <span className="text-sm font-medium text-text-dark truncate">{username}</span>
+          </div>
+        )}
+        <button
+          onClick={signOut}
+          title="Esci / Odjava"
+          className="p-1.5 rounded-10 text-text-muted hover:bg-accent-soft hover:text-text-dark transition-colors flex-shrink-0"
+        >
+          <LogOut size={16} strokeWidth={1.5} />
+        </button>
+      </div>
 
       {/* Language toggle - hidden when collapsed */}
       {!collapsed && (

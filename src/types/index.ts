@@ -125,3 +125,96 @@ export interface VehicleFile {
 }
 
 export type Language = 'it' | 'sl';
+
+export type InvoiceStatus = 'draft' | 'confirmed' | 'sent' | 'paid' | 'cancelled';
+export type InvoiceType = 'monthly_rent' | 'deposit' | 'penalties' | 'insurance' | 'damage' | 'other';
+
+export interface InvoiceItem {
+  id: string;
+  invoice_id: string;
+  sort_order: number;
+  code: string | null;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
+  line_type: 'item' | 'text' | 'subtotal' | 'space';
+}
+
+export interface InvoicePaymentSchedule {
+  id: string;
+  invoice_id: string;
+  due_date: string;
+  amount: number;
+  is_paid: boolean;
+  paid_at: string | null;
+  notes: string | null;
+}
+
+export interface InvoiceRecord {
+  id: string;
+  invoice_number: string;
+  invoice_year: number;
+  invoice_sequence: number;
+  invoice_type: InvoiceType;
+  client_id: string | null;
+  vehicle_id: string | null;
+  invoice_date: string;
+  service_date: string | null;
+  service_period: string | null;
+  due_date: string | null;
+  contract_ref_date: string | null;
+  contract_ref_it: string | null;
+  contract_ref_sl: string | null;
+  subtotal: number;
+  vat_rate: number;
+  vat_amount: number;
+  total: number;
+  is_reverse_charge: boolean;
+  vat_exempt_reason: string | null;
+  status: InvoiceStatus;
+  sent_at: string | null;
+  sent_to_email: string | null;
+  pdf_url: string | null;
+  pdf_path: string | null;
+  language: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  billing_month: number | null;
+  // Relations
+  client?: Client | null;
+  vehicle?: Vehicle | null;
+  items?: InvoiceItem[];
+  payment_schedules?: InvoicePaymentSchedule[];
+}
+
+export interface Settings {
+  id: number;
+  company_name: string | null;
+  company_address: string | null;
+  company_postal: string | null;
+  company_city: string | null;
+  company_country: string | null;
+  company_tax_number: string | null;
+  company_reg_number: string | null;
+  company_share_capital: string | null;
+  company_email: string | null;
+  company_logo_url: string | null;
+  iban: string | null;
+  swift: string | null;
+  payment_method: string | null;
+  invoice_current_year: number | null;
+  invoice_start_number: number | null;
+  vat_rate: number | null;
+  contract_ref_it: string | null;
+  contract_ref_sl: string | null;
+  payment_due_days: number | null;
+  n8n_webhook_url: string | null;
+  vies_webhook_url: string | null;
+  cc_email: string | null;
+  email_subject_it: string | null;
+  email_subject_sl: string | null;
+  email_body_it: string | null;
+  email_body_sl: string | null;
+}

@@ -14,6 +14,7 @@ const routeTitles: Record<string, string> = {
   '/penalties': 'nav.penalties',
   '/payments': 'nav.payments',
   '/analytics': 'nav.analytics',
+  '/invoices': 'nav.invoices',
 };
 
 export default function TopBar({ t, onOpenMobile }: TopBarProps) {
