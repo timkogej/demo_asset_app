@@ -69,7 +69,7 @@ interface FormItem {
   description: string;
   quantity: number;
   unit_price: number;
-  line_type: 'item' | 'text' | 'space';
+  line_type: 'item' | 'text' | 'space' | 'subtotal';
   show_translation: boolean;
 }
 
@@ -621,7 +621,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     vehicleName: string,
     regNumber: string,
     unitPrice: number,
-    isRC: boolean,
+    _isRC: boolean,
     servicePeriod: string
   ): FormItem[] {
     if (type === 'monthly_rent') {
@@ -770,6 +770,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         billing_month: null,
+        input_language: null,
         client: client as Client,
         vehicle: vehicle as Vehicle,
         items: formItems,

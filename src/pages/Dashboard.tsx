@@ -253,7 +253,7 @@ export default function Dashboard({ t }: DashboardProps) {
             icon={Users}
             label={t('dashboard.paid_this_month')}
             value={paidThisMonth}
-            subtitle={`${t('common.of')} ${invoices.filter((i) => i.billing_month === currentMonth && i.billing_year === currentYear).length}`}
+            subtitle={`${t('common.of')} ${invoices.filter((i) => i.billing_month === currentMonth && i.invoice_year === currentYear).length}`}
             iconColor="text-success"
           />
           <KpiCard

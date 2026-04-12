@@ -7,7 +7,6 @@ import {
   biLabel,
   getBilingualPeriod,
   translateITtoSL,
-  translateSLtoSecondary,
   translateWithDatePreservation,
   normalizeSLtoIT,
   type InvoiceLang,
