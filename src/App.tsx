@@ -11,6 +11,7 @@ import Analytics from './pages/Analytics';
 import Documents from './pages/Documents';
 import Settings from './pages/Settings';
 import Invoices from './pages/Invoices';
+import Payments from './pages/Payments';
 import { useTranslation } from './i18n/useTranslation';
 
 function AppRoutes() {
@@ -37,6 +38,7 @@ function AppRoutes() {
         <Route path="documents" element={<Documents t={t} language={language} />} />
         <Route path="settings" element={<Settings t={t} language={language} />} />
         <Route path="invoices" element={<Invoices t={t} language={language} />} />
+        <Route path="payments" element={<Payments t={t} language={language} />} />
       </Route>
 
       {/* Catch all */}

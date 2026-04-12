@@ -6,6 +6,7 @@ import Modal from '../components/ui/Modal';
 import SearchInput from '../components/ui/SearchInput';
 import { isValidClientId, formatClientId } from '../lib/utils';
 import { clientDisplayName, countryFlag } from '../lib/clientHelpers';
+import { formatCurrency } from '../lib/invoiceCalculations';
 import type { Client, Language } from '../types';
 
 const COUNTRY_OPTIONS = ['SI', 'IT', 'HR', 'DE', 'RO', 'AT', 'HU', 'FR', 'ES', 'NL', 'BE', 'PL'];
@@ -424,6 +425,60 @@ function ClientDrawer({ client, tab, onTabChange, onClose, onSaved, t }: DrawerP
   );
 }
 
+// ─── Client Payment Status ────────────────────────────────────────────────────
+function ClientPaymentStatus({ clientId, t }: { clientId: string; t: (k: string) => string }) {
+  const [totalInvoiced, setTotalInvoiced] = useState<number | null>(null);
+  const [totalPaid, setTotalPaid] = useState<number | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from('payments')
+      .select('amount, invoice_amount')
+      .eq('client_id', clientId)
+      .then(({ data }) => {
+        if (!data) return;
+        setTotalInvoiced(data.reduce((s, p) => s + (p.invoice_amount ?? 0), 0));
+        setTotalPaid(data.reduce((s, p) => s + p.amount, 0));
+      });
+  }, [clientId]);
+
+  if (totalInvoiced === null) return (
+    <div className="h-4 rounded bg-accent-soft animate-pulse w-full" />
+  );
+
+  const outstanding = totalInvoiced - (totalPaid ?? 0);
+  const hasDebt = outstanding > 0;
+
+  return (
+    <div className="rounded-10 p-3 space-y-1.5 text-sm" style={{ backgroundColor: hasDebt ? '#fef3c7' : 'var(--color-accent-soft)' }}>
+      <div className="flex justify-between">
+        <span className="text-text-muted">{t('pay.total_invoiced_label')}</span>
+        <span className="font-medium tabular-nums">€ {formatCurrency(totalInvoiced)}</span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-text-muted">{t('pay.total_paid_label')}</span>
+        <span className="font-medium text-primary tabular-nums">€ {formatCurrency(totalPaid ?? 0)}</span>
+      </div>
+      {outstanding !== 0 && (
+        <div className="flex justify-between border-t border-accent-muted pt-1.5">
+          <span className="text-text-muted">{t('pay.outstanding_label')}</span>
+          <span className={`font-bold tabular-nums ${hasDebt ? 'text-danger' : 'text-primary'}`}>
+            € {formatCurrency(outstanding)}
+          </span>
+        </div>
+      )}
+      <div className="flex justify-between items-center border-t border-accent-muted pt-1.5">
+        <span className="text-text-muted">Status</span>
+        {hasDebt ? (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">{t('pay.has_debt')}</span>
+        ) : (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-accent-soft text-primary">{t('pay.status_ok')}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Drawer Details Tab ───────────────────────────────────────────────────────
 function DrawerDetails({ client, t }: { client: Client; t: (k: string) => string }) {
   const displayName = clientDisplayName(client);
@@ -554,6 +609,14 @@ function DrawerDetails({ client, t }: { client: Client; t: (k: string) => string
             ))}
           </div>
         )}
+      </div>
+
+      {/* Payment status */}
+      <div>
+        <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
+          Stanje plačil / Stato pagamenti
+        </p>
+        <ClientPaymentStatus clientId={client.id} t={t} />
       </div>
     </div>
   );

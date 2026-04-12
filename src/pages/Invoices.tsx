@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import { getSettings } from '../lib/settings';
 import { clientDisplayName } from '../lib/clientHelpers';
+import { useAuth } from '../context/AuthContext';
 import { checkVies, shouldUseReverseCharge } from '../lib/vies';
 import {
   calculateInvoiceTotals,
@@ -18,7 +19,7 @@ import {
 import { generateInvoicePDF } from '../lib/pdfGenerator';
 import type {
   Language, InvoiceRecord, InvoiceStatus, InvoiceType,
-  InvoiceItem, Client, Vehicle, Settings,
+  InvoiceItem, Client, Vehicle, Settings, Payment,
 } from '../types';
 
 interface InvoicesProps {
@@ -136,11 +137,144 @@ function newItemId() {
   return `item_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+// ---- MarkAsPaidModal ----
+
+interface PaymentFormData {
+  amount: number;
+  payment_date: string;
+  method: string;
+  notes: string;
+}
+
+const PAYMENT_METHODS = [
+  'BANCNO NAKAZILO / BONIFICO BANCARIO',
+  'GOTOVINA / CONTANTI',
+  'KREDITNA KARTICA / CARTA DI CREDITO',
+  'PAYPAL',
+  'DRUGO / ALTRO',
+];
+
+function MarkAsPaidModal({
+  invoice,
+  t,
+  onClose,
+  onConfirm,
+}: {
+  invoice: InvoiceRecord;
+  t: (k: string) => string;
+  onClose: () => void;
+  onConfirm: (data: PaymentFormData) => void;
+}) {
+  const today = new Date().toISOString().split('T')[0];
+  const [form, setForm] = useState<PaymentFormData>({
+    amount: invoice.total,
+    payment_date: today,
+    method: PAYMENT_METHODS[0],
+    notes: '',
+  });
+
+  const isPartial = form.amount < invoice.total;
+
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handle);
+    return () => document.removeEventListener('keydown', handle);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-10 shadow-2xl w-full max-w-md animate-slideIn"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-accent-soft">
+          <h3 className="font-semibold text-text-dark text-sm">{t('pay.modal_title')}</h3>
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-accent-soft text-text-muted">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4 space-y-4">
+          {/* Amount */}
+          <div>
+            <label className="label">{t('pay.amount_label')}</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm font-medium">€</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="input-field pl-7"
+                value={form.amount}
+                onChange={(e) => setForm((f) => ({ ...f, amount: parseFloat(e.target.value) || 0 }))}
+              />
+            </div>
+            <p className="text-xs text-text-muted mt-1">
+              {t('pay.invoice_amount_note')}: € {formatCurrency(invoice.total)}
+            </p>
+            {isPartial && (
+              <p className="text-xs text-amber-600 font-medium mt-1 flex items-center gap-1">
+                <AlertTriangle size={12} strokeWidth={1.8} />
+                {t('pay.partial_warning')}
+              </p>
+            )}
+          </div>
+
+          {/* Date */}
+          <div>
+            <label className="label">{t('pay.date_label')}</label>
+            <input
+              type="date"
+              className="input-field"
+              value={form.payment_date}
+              onChange={(e) => setForm((f) => ({ ...f, payment_date: e.target.value }))}
+            />
+          </div>
+
+          {/* Method */}
+          <div>
+            <label className="label">{t('pay.method_label')}</label>
+            <select
+              className="input-field"
+              value={form.method}
+              onChange={(e) => setForm((f) => ({ ...f, method: e.target.value }))}
+            >
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="label">{t('pay.notes_label')}</label>
+            <textarea
+              className="input-field resize-none w-full"
+              rows={2}
+              value={form.notes}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-accent-soft">
+          <button onClick={onClose} className="btn-secondary text-sm">{t('pay.cancel_btn')}</button>
+          <button onClick={() => onConfirm(form)} className="btn-primary text-sm">{t('pay.confirm_btn')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---- main component ----
 
 export default function Invoices({ t, language: _language }: InvoicesProps) {
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
+  const { username } = useAuth();
 
   // data
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
@@ -166,11 +300,13 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   } | null>(null);
   const [genMonth, setGenMonth] = useState(currentMonth);
   const [genYear, setGenYear] = useState(currentYear);
+  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
 
   // preview
   const [previewInvoice, setPreviewInvoice] = useState<InvoiceRecord | null>(null);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [previewPayments, setPreviewPayments] = useState<Payment[]>([]);
 
   // send
   const [sendTarget, setSendTarget] = useState<InvoiceRecord | null>(null);
@@ -178,6 +314,9 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
 
   // cancel
   const [cancelTarget, setCancelTarget] = useState<InvoiceRecord | null>(null);
+
+  // mark paid modal
+  const [markPaidTarget, setMarkPaidTarget] = useState<InvoiceRecord | null>(null);
 
   // manual form
   const [showManualForm, setShowManualForm] = useState(false);
@@ -310,7 +449,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       const response = await fetch(settings.n8n_monthly_webhook_url!, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month: genMonth, year: genYear, triggered_by: 'App' }),
+        body: JSON.stringify({ month: genMonth, year: genYear, invoice_date: invoiceDate, triggered_by: 'App' }),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -393,6 +532,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     setPreviewInvoice(invoice);
     setPdfBlobUrl(null);
     setPdfLoading(true);
+    setPreviewPayments([]);
     try {
       // Always fetch fresh full invoice data so client/vehicle relations are complete
       const full = await fetchFullInvoice(invoice.id);
@@ -406,6 +546,13 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     } finally {
       setPdfLoading(false);
     }
+    // Fetch payment history (non-blocking)
+    supabase
+      .from('payments')
+      .select('*')
+      .eq('invoice_id', invoice.id)
+      .order('payment_date', { ascending: false })
+      .then(({ data }) => setPreviewPayments((data as Payment[]) || []));
   }
 
   function closePreview() {
@@ -413,6 +560,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     setPdfBlobUrl(null);
     setPreviewInvoice(null);
     setPreviewIsBlob(false);
+    setPreviewPayments([]);
   }
 
   // ---- download ----
@@ -552,16 +700,44 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
 
   // ---- mark paid ----
 
-  async function handleMarkPaid(invoice: InvoiceRecord) {
+  async function handleConfirmPayment(data: PaymentFormData, invoice: InvoiceRecord) {
+    const isPartial = data.amount < invoice.total;
     try {
-      await supabase
+      const { error: payErr } = await supabase.from('payments').insert({
+        invoice_id: invoice.id,
+        client_id: invoice.client_id,
+        amount: data.amount,
+        payment_date: data.payment_date,
+        method: data.method,
+        confirmed: true,
+        notes: data.notes || null,
+        invoice_amount: invoice.total,
+        is_partial: isPartial,
+        created_by: username,
+      });
+      if (payErr) throw payErr;
+
+      const newStatus = isPartial ? 'sent' : 'paid';
+      const { error: invErr } = await supabase
         .from('invoices')
-        .update({ status: 'paid', updated_at: new Date().toISOString() })
+        .update({
+          status: newStatus,
+          paid_at: isPartial ? null : new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', invoice.id);
+      if (invErr) throw invErr;
+
       setInvoices((prev) =>
-        prev.map((i) => (i.id === invoice.id ? { ...i, status: 'paid' } : i))
+        prev.map((i) => (i.id === invoice.id ? { ...i, status: newStatus } : i))
       );
-      toast.success(t('inv.mark_paid'));
+      setMarkPaidTarget(null);
+
+      if (isPartial) {
+        toast.success('Delno plačilo zabeleženo / Pagamento parziale registrato');
+      } else {
+        toast.success('Plačilo potrjeno / Pagamento confermato');
+      }
     } catch {
       toast.error(t('error.save_failed'));
     }
@@ -1385,7 +1561,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                         </button>
                         {inv.status === 'sent' && (
                           <button
-                            onClick={() => handleMarkPaid(inv)}
+                            onClick={() => setMarkPaidTarget(inv)}
                             className="p-1.5 rounded hover:bg-accent-soft text-text-muted hover:text-accent transition-colors"
                             title={t('inv.mark_paid')}
                           >
@@ -1495,6 +1671,18 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                 {years.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-text-muted mb-1">
+                {t('inv.invoice_date_field')}
+              </label>
+              <input
+                type="date"
+                value={invoiceDate}
+                onChange={(e) => setInvoiceDate(e.target.value)}
+                className="input-field w-full"
+              />
+              <p className="text-xs text-text-muted mt-1">{t('inv.invoice_date_note')}</p>
+            </div>
             <p className="text-sm text-text-muted mb-1">
               {t('inv.generate_confirm_title').replace('?', '')} — <strong>{MONTHS[genMonth - 1]} {genYear}</strong>
             </p>
@@ -1593,6 +1781,16 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
         </div>
       )}
 
+      {/* ---- Mark As Paid Modal ---- */}
+      {markPaidTarget && (
+        <MarkAsPaidModal
+          invoice={markPaidTarget}
+          t={t}
+          onClose={() => setMarkPaidTarget(null)}
+          onConfirm={(data) => handleConfirmPayment(data, markPaidTarget)}
+        />
+      )}
+
       {/* ---- PDF Preview modal ---- */}
       {previewInvoice && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={closePreview}>
@@ -1623,6 +1821,38 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                 </div>
               )}
             </div>
+            {/* Payment history */}
+            {previewPayments.length > 0 && (() => {
+              const totalPaid = previewPayments.reduce((s, p) => s + p.amount, 0);
+              const remaining = previewInvoice.total - totalPaid;
+              return (
+                <div className="border-t border-accent-soft px-5 py-3 bg-bg/50 max-h-40 overflow-y-auto">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">{t('pay.payment_history')}</p>
+                    {remaining <= 0 ? (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-accent-soft text-primary">{t('pay.paid_in_full')}</span>
+                    ) : (
+                      <span className="text-xs text-amber-600 font-medium">{t('pay.partially_paid')} — {t('pay.remaining')}: € {formatCurrency(remaining)}</span>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    {previewPayments.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between text-xs">
+                        <span className="text-text-muted font-mono">{p.payment_date.split('-').reverse().join('/')}</span>
+                        <span className="font-bold text-primary">€ {formatCurrency(p.amount)}</span>
+                        <span className="text-text-muted">{p.method ?? '—'}</span>
+                        {p.is_partial ? (
+                          <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">{t('pay.partial')}</span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded-full bg-accent-soft text-primary">{t('pay.full')}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="flex items-center justify-between px-5 py-3 border-t border-accent-soft">
               <button
                 onClick={() => { closePreview(); handleOpenEdit(previewInvoice); }}

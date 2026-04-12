@@ -97,15 +97,19 @@ export interface Invoice {
 export interface Payment {
   id: string;
   invoice_id: string;
-  client_id: string;
-  invoice?: Invoice;
-  client?: Client;
+  client_id: string | null;
   amount: number;
   payment_date: string;
-  method?: string;
+  method: string | null;
   confirmed: boolean;
-  notes?: string;
+  notes: string | null;
   created_at: string;
+  invoice_amount: number | null;
+  is_partial: boolean;
+  created_by: string | null;
+  // Relations
+  invoice?: InvoiceRecord | null;
+  client?: Client | null;
 }
 
 export interface VehicleFile {
