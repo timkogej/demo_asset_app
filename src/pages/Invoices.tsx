@@ -715,7 +715,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
         is_partial: isPartial,
         created_by: username,
       });
-      if (payErr) throw payErr;
+      if (payErr) { console.error('payments insert error:', payErr); throw payErr; }
 
       const newStatus = isPartial ? 'sent' : 'paid';
       const { error: invErr } = await supabase
@@ -726,7 +726,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', invoice.id);
-      if (invErr) throw invErr;
+      if (invErr) { console.error('invoices update error:', invErr); throw invErr; }
 
       setInvoices((prev) =>
         prev.map((i) => (i.id === invoice.id ? { ...i, status: newStatus } : i))
