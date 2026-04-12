@@ -4,11 +4,11 @@ import { Car, Users, FileText, DollarSign, RefreshCw, AlertCircle, Clock, Trendi
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
-import { triggerMonthlyInvoiceWebhook } from '../lib/n8n';
+import { getSettings } from '../lib/settings';
 import { clientDisplayName } from '../lib/clientHelpers';
 import KpiCard from '../components/ui/KpiCard';
 import Badge from '../components/ui/Badge';
-import type { Vehicle, Invoice, Penalty, Language } from '../types';
+import type { Vehicle, InvoiceRecord, Language } from '../types';
 
 interface DashboardProps {
   t: (key: string) => string;
@@ -64,6 +64,11 @@ function ExpiryCell({ dateStr }: { dateStr: string | null }) {
   return <span className="text-xs">{text}</span>;
 }
 
+const MONTHS_IT = [
+  'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre',
+];
+
 function OwnershipBadge({ status, t }: { status: 'LEASING' | "PROPRIETA'"; t: (k: string) => string }) {
   if (status === 'LEASING') {
     return (
@@ -106,9 +111,16 @@ function ProfitCell({ value }: { value: number | null | undefined }) {
 export default function Dashboard({ t }: DashboardProps) {
   const navigate = useNavigate();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [showMonthlyConfirm, setShowMonthlyConfirm] = useState(false);
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [generationResult, setGenerationResult] = useState<{
+    created: number; skipped: number; errors: number; period: string;
+  } | null>(null);
+  const [genMonth, setGenMonth] = useState(() => new Date().getMonth() + 1);
+  const [genYear, setGenYear] = useState(() => new Date().getFullYear());
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -128,7 +140,7 @@ export default function Dashboard({ t }: DashboardProps) {
       if (invoicesRes.error) throw invoicesRes.error;
 
       setVehicles((vehiclesRes.data as Vehicle[]) || []);
-      setInvoices((invoicesRes.data as Invoice[]) || []);
+      setInvoices((invoicesRes.data as InvoiceRecord[]) || []);
     } catch {
       toast.error(t('error.fetch_failed'));
     } finally {
@@ -149,124 +161,62 @@ export default function Dashboard({ t }: DashboardProps) {
     (inv) =>
       inv.status === 'paid' &&
       inv.billing_month === currentMonth &&
-      inv.billing_year === currentYear
+      inv.invoice_year === currentYear
   ).length;
 
   const totalInvoices = invoices.length;
 
   const pendingAmount = invoices
-    .filter((inv) => inv.status === 'sent' || inv.status === 'overdue' || inv.status === 'draft')
-    .reduce((sum, inv) => sum + inv.total_amount, 0);
+    .filter((inv) => inv.status === 'sent' || inv.status === 'confirmed')
+    .reduce((sum, inv) => sum + inv.total, 0);
 
-  const handleGenerateInvoices = async () => {
+  async function handleGenerateMonthlyClick() {
+    const settings = await getSettings();
+    if (!settings?.n8n_monthly_webhook_url) {
+      toast.error(t('inv.webhook_not_configured'));
+      return;
+    }
+    setShowMonthlyConfirm(true);
+  }
+
+  async function executeMonthlyGeneration() {
     setGenerating(true);
+    const settings = await getSettings();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
-      // Fetch active vehicles
-      const { data: activeVehiclesData, error: vehiclesError } = await supabase
-        .from('vehicles')
-        .select('*, client:clients(*)')
-        .eq('status', 'active');
-
-      if (vehiclesError) throw vehiclesError;
-
-      if (!activeVehiclesData || activeVehiclesData.length === 0) {
-        toast(t('dashboard.no_vehicles'));
-        return;
-      }
-
-      // Check existing invoices for this month
-      const { data: existingInvoices, error: existingError } = await supabase
-        .from('invoices')
-        .select('vehicle_id')
-        .eq('billing_month', currentMonth)
-        .eq('billing_year', currentYear);
-
-      if (existingError) throw existingError;
-
-      const existingVehicleIds = new Set(
-        (existingInvoices || []).map((inv: { vehicle_id: string }) => inv.vehicle_id)
-      );
-
-      const vehiclesToInvoice = (activeVehiclesData as Vehicle[]).filter(
-        (v) => !existingVehicleIds.has(v.id)
-      );
-
-      if (vehiclesToInvoice.length === 0) {
-        toast('Tutte le fatture del mese sono già state generate');
-        return;
-      }
-
-      // Fetch pending penalties for each vehicle
-      const vehicleIds = vehiclesToInvoice.map((v) => v.id);
-      const { data: pendingPenalties, error: penaltiesError } = await supabase
-        .from('penalties')
-        .select('*')
-        .in('vehicle_id', vehicleIds)
-        .is('added_to_invoice_id', null);
-
-      if (penaltiesError) throw penaltiesError;
-
-      const penaltiesByVehicle: Record<string, Penalty[]> = {};
-      for (const penalty of (pendingPenalties as Penalty[]) || []) {
-        if (!penaltiesByVehicle[penalty.vehicle_id]) {
-          penaltiesByVehicle[penalty.vehicle_id] = [];
-        }
-        penaltiesByVehicle[penalty.vehicle_id].push(penalty);
-      }
-
-      const prefix = `FI-${currentYear}${String(currentMonth).padStart(2, '0')}`;
-      const insertPayload = vehiclesToInvoice.map((vehicle, idx) => {
-        const vehiclePenalties = penaltiesByVehicle[vehicle.id] || [];
-        const penaltiesTotal = vehiclePenalties.reduce((sum, p) => sum + p.amount, 0);
-        const baseAmount = vehicle.received_installment ?? 0;
-        return {
-          client_id: vehicle.client_id,
-          vehicle_id: vehicle.id,
-          invoice_number: `${prefix}-${String(idx + 1).padStart(3, '0')}`,
-          base_amount: baseAmount,
-          penalties_total: penaltiesTotal,
-          total_amount: baseAmount + penaltiesTotal,
-          billing_month: currentMonth,
-          billing_year: currentYear,
-          status: 'draft',
-        };
+      const response = await fetch(settings.n8n_monthly_webhook_url!, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month: genMonth, year: genYear, triggered_by: 'App' }),
+        signal: controller.signal,
       });
-
-      const { data: newInvoices, error: insertError } = await supabase
-        .from('invoices')
-        .insert(insertPayload)
-        .select();
-
-      if (insertError) throw insertError;
-
-      // Link penalties to new invoices
-      if (newInvoices) {
-        for (const newInvoice of newInvoices as Invoice[]) {
-          const vehiclePenalties = penaltiesByVehicle[newInvoice.vehicle_id || ''] || [];
-          if (vehiclePenalties.length > 0) {
-            const penaltyIds = vehiclePenalties.map((p) => p.id);
-            await supabase
-              .from('penalties')
-              .update({ added_to_invoice_id: newInvoice.id })
-              .in('id', penaltyIds);
-          }
-        }
+      clearTimeout(timeoutId);
+      if (!response.ok) throw new Error(`Webhook error: ${response.status}`);
+      const result = await response.json();
+      setShowMonthlyConfirm(false);
+      setGenerationResult({
+        created: result.created || 0,
+        skipped: result.skipped || 0,
+        errors: result.errors || 0,
+        period: result.period || `${MONTHS_IT[genMonth - 1]} ${genYear}`,
+      });
+      setShowResultModal(true);
+      await fetchData();
+    } catch (err: unknown) {
+      clearTimeout(timeoutId);
+      if (err instanceof Error && err.name === 'AbortError') {
+        toast.error(
+          'Generiranje traja dlje kot pričakovano. Preveri stran Računi čez minuto. / ' +
+          'La generazione sta impiegando più tempo del previsto. Controlla la pagina Fatture tra un minuto.'
+        );
+      } else {
+        toast.error(t('error.generate_failed'));
       }
-
-      await triggerMonthlyInvoiceWebhook();
-
-      toast.success(
-        `${newInvoices?.length || 0} ${t('dashboard.invoices_generated')}`
-      );
-
-      fetchData();
-    } catch (err) {
-      console.error(err);
-      toast.error(t('error.generate_failed'));
     } finally {
       setGenerating(false);
     }
-  };
+  }
 
   return (
     <div className="space-y-6">
@@ -274,7 +224,7 @@ export default function Dashboard({ t }: DashboardProps) {
       <div className="flex items-center justify-between">
         <h2 className="page-title">{t('dashboard.title')}</h2>
         <button
-          onClick={handleGenerateInvoices}
+          onClick={handleGenerateMonthlyClick}
           disabled={generating || loading}
           className="btn-primary flex items-center gap-2"
         >
@@ -396,6 +346,82 @@ export default function Dashboard({ t }: DashboardProps) {
           </div>
         )}
       </div>
+      {/* ---- Monthly generation confirm modal ---- */}
+      {showMonthlyConfirm && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => !generating && setShowMonthlyConfirm(false)}>
+          <div className="bg-white rounded-10 shadow-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="section-title mb-2">{t('inv.generate_confirm_title')}</h3>
+            <div className="flex gap-3 mb-4">
+              <select
+                value={genMonth}
+                onChange={(e) => setGenMonth(Number(e.target.value))}
+                className="input-field flex-1"
+                disabled={generating}
+              >
+                {MONTHS_IT.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+              </select>
+              <input
+                type="number"
+                value={genYear}
+                onChange={(e) => setGenYear(Number(e.target.value))}
+                className="input-field w-24"
+                min={2020}
+                max={2099}
+                disabled={generating}
+              />
+            </div>
+            <p className="text-sm text-text-muted mb-4">{t('inv.generate_confirm_body')}</p>
+            {generating && (
+              <p className="text-xs text-text-muted mb-3">
+                To lahko traja do 30 sekund / Potrebbe richiedere fino a 30 secondi
+              </p>
+            )}
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setShowMonthlyConfirm(false)} className="btn-secondary" disabled={generating}>
+                {t('btn.cancel')}
+              </button>
+              <button onClick={executeMonthlyGeneration} disabled={generating} className="btn-primary flex items-center gap-2">
+                {generating && <RefreshCw size={14} strokeWidth={2} className="animate-spin" />}
+                {generating ? t('inv.generating') : t('inv.generate_monthly')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---- Generation results modal ---- */}
+      {showResultModal && generationResult && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowResultModal(false)}>
+          <div className="bg-white rounded-10 shadow-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="section-title mb-4">
+              {t('inv.generate_result_title')} — {generationResult.period}
+            </h3>
+            <div className="space-y-2 text-sm mb-2">
+              <p>✅ {t('inv.generate_created')}: <strong>{generationResult.created}</strong></p>
+              <p>⏭ {t('inv.generate_skipped')}: <strong>{generationResult.skipped}</strong></p>
+              <p>❌ {t('inv.generate_errors')}: <strong>{generationResult.errors}</strong></p>
+            </div>
+            <p className="text-xs text-text-muted mb-1">{t('inv.draft_status_note')}</p>
+            <p className="text-xs text-text-muted mb-5">
+              Pojdi na stran Računi za pregled in pošiljanje. / Vai alla pagina Fatture per revisione e invio.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setShowResultModal(false)} className="btn-secondary">
+                {t('common.close')}
+              </button>
+              <button
+                onClick={() => {
+                  setShowResultModal(false);
+                  navigate(`/invoices?status=draft&month=${genMonth}&year=${genYear}`);
+                }}
+                className="btn-primary"
+              >
+                {t('inv.go_to_invoices')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

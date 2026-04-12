@@ -7,8 +7,6 @@ import { LoginPage } from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import Vehicles from './pages/Vehicles';
 import Clients from './pages/Clients';
-import Penalties from './pages/Penalties';
-import Payments from './pages/Payments';
 import Analytics from './pages/Analytics';
 import Documents from './pages/Documents';
 import Settings from './pages/Settings';
@@ -35,9 +33,7 @@ function AppRoutes() {
         <Route index element={<Dashboard t={t} language={language} />} />
         <Route path="vehicles" element={<Vehicles t={t} language={language} />} />
         <Route path="clients" element={<Clients t={t} language={language} />} />
-        <Route path="penalties" element={<Penalties t={t} language={language} />} />
-        <Route path="payments" element={<Payments t={t} language={language} />} />
-        <Route path="analytics" element={<Analytics t={t} language={language} />} />
+<Route path="analytics" element={<Analytics t={t} language={language} />} />
         <Route path="documents" element={<Documents t={t} language={language} />} />
         <Route path="settings" element={<Settings t={t} language={language} />} />
         <Route path="invoices" element={<Invoices t={t} language={language} />} />

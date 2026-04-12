@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Eye, Send, Download, CheckCircle, AlertTriangle, X, FileText, Plus, Trash2,
-  ChevronUp, ChevronDown,
+  ChevronUp, ChevronDown, Pencil, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
@@ -95,6 +95,7 @@ interface ManualForm {
   items: FormItem[];
   usePaymentSchedule: boolean;
   paymentSchedules: FormSchedule[];
+  inputLanguage: 'IT' | 'SL';
 }
 
 const BLANK_FORM: ManualForm = {
@@ -113,7 +114,10 @@ const BLANK_FORM: ManualForm = {
   items: [],
   usePaymentSchedule: false,
   paymentSchedules: [],
+  inputLanguage: 'IT',
 };
+
+const PAGE_SIZE = 50;
 
 const INVOICE_TYPES: InvoiceType[] = [
   'monthly_rent', 'deposit', 'penalties', 'insurance', 'damage', 'other',
@@ -151,11 +155,14 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   const [filterType, setFilterType] = useState<InvoiceType | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // pagination
+  const [currentPage, setCurrentPage] = useState(1);
+
   // monthly generation
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generateResults, setGenerateResults] = useState<{
-    created: number; skipped: number; errors: string[];
+    created: number; skipped: number; errors: number; period: string;
   } | null>(null);
   const [genMonth, setGenMonth] = useState(currentMonth);
   const [genYear, setGenYear] = useState(currentYear);
@@ -181,6 +188,10 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   const [formPdfUrl, setFormPdfUrl] = useState<string | null>(null);
   const [formPdfLoading, setFormPdfLoading] = useState(false);
   const viesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // edit mode
+  const [editMode, setEditMode] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState<InvoiceRecord | null>(null);
 
   // ---- fetch ----
 
@@ -210,7 +221,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       const [{ data: clientData }, { data: vehicleData }] = await Promise.all([
         supabase
           .from('clients')
-          .select('id, company_name, company_name_additional, email, country, tax_number, is_vat_payer')
+          .select('id, company_name, company_name_additional, email, phone, address, postal_code, city, country, tax_number, registration_number, is_vat_payer')
           .eq('is_client', true)
           .order('company_name', { ascending: true, nullsFirst: false }),
         supabase.from('vehicles').select('*, client:clients(id, company_name, company_name_additional, email, country, tax_number, is_vat_payer)').order('registration_number'),
@@ -226,6 +237,22 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     fetchInvoices();
     fetchClientsAndVehicles();
   }, [fetchInvoices, fetchClientsAndVehicles]);
+
+  // Read URL params on mount and apply filters (e.g. after navigating from Dashboard results)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('status');
+    const month = params.get('month');
+    const year = params.get('year');
+    if (status) setFilterStatus(status as InvoiceStatus | 'all');
+    if (month) setFilterMonth(parseInt(month));
+    if (year) setFilterYear(parseInt(year));
+  }, []);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterStatus, filterMonth, filterYear, filterType, searchQuery]);
 
   // ---- filter ----
 
@@ -244,6 +271,12 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     return true;
   });
 
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginatedInvoices = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
   // ---- KPI ----
 
   const thisMonthInvoices = invoices.filter(
@@ -259,112 +292,48 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
 
   // ---- monthly generation ----
 
+  async function handleGenerateMonthlyClick() {
+    const settings = await getSettings();
+    if (!settings?.n8n_monthly_webhook_url) {
+      toast.error(t('inv.webhook_not_configured'));
+      return;
+    }
+    setShowGenerateConfirm(true);
+  }
+
   async function handleGenerateMonthly() {
     setGenerating(true);
+    const settings = await getSettings();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
-      const settings = await getSettings();
-      const { data: activeVehicles } = await supabase
-        .from('vehicles')
-        .select('*, client:clients(*)')
-        .eq('status', 'active')
-        .not('client_id', 'is', null);
-
-      const results = { created: 0, skipped: 0, errors: [] as string[] };
-
-      for (const vehicle of (activeVehicles || [])) {
-        // check existing
-        const { data: existing } = await supabase
-          .from('invoices')
-          .select('id')
-          .eq('vehicle_id', vehicle.id)
-          .eq('invoice_year', genYear)
-          .eq('billing_month', genMonth)
-          .neq('status', 'cancelled')
-          .maybeSingle();
-
-        if (existing) { results.skipped++; continue; }
-
-        // VIES check
-        let isReverseCharge = false;
-        const client = vehicle.client;
-        if (client && client.country !== 'SI' && client.is_vat_payer && client.tax_number) {
-          try {
-            const viesResult = await checkVies(client.tax_number, client.country);
-            isReverseCharge = shouldUseReverseCharge(client, viesResult.valid);
-          } catch {
-            isReverseCharge = false;
-          }
-        }
-
-        // next invoice number
-        const { data: numData, error: numErr } = await supabase
-          .rpc('get_next_invoice_number', { p_year: genYear });
-        if (numErr || !numData?.[0]) { results.errors.push(vehicle.registration_number); continue; }
-
-        const invoiceDate = new Date(genYear, genMonth - 1, 1).toISOString().split('T')[0];
-        const dueDays = settings?.payment_due_days ?? 30;
-        const dueDate = calculateDueDate(invoiceDate, dueDays);
-        const subtotal = vehicle.received_installment || 0;
-        const vatRate = settings?.vat_rate ?? 22;
-        const vatAmount = isReverseCharge ? 0 : Math.round(subtotal * vatRate) / 100;
-        const servicePeriod = getItalianMonth(genMonth - 1, genYear);
-        const contractRefDate = vehicle.lease_start_date || invoiceDate;
-        const contractRefIt = `${settings?.contract_ref_it || ''} ${formatDate(contractRefDate)}`.trim();
-        const contractRefSl = `${settings?.contract_ref_sl || ''} ${formatDate(contractRefDate)}`.trim();
-
-        const invoiceRecord = {
-          invoice_number: numData[0].invoice_number,
-          invoice_year: genYear,
-          invoice_sequence: numData[0].sequence_number,
-          invoice_type: 'monthly_rent',
-          client_id: vehicle.client_id,
-          vehicle_id: vehicle.id,
-          invoice_date: invoiceDate,
-          service_period: servicePeriod,
-          due_date: dueDate,
-          contract_ref_date: contractRefDate,
-          contract_ref_it: contractRefIt,
-          contract_ref_sl: contractRefSl,
-          subtotal,
-          vat_rate: vatRate,
-          vat_amount: vatAmount,
-          total: subtotal + vatAmount,
-          is_reverse_charge: isReverseCharge,
-          status: 'draft',
-          language: client?.country === 'SI' ? 'sl' : 'it',
-          billing_month: genMonth,
-        };
-
-        const { data: newInv, error: invErr } = await supabase
-          .from('invoices')
-          .insert(invoiceRecord)
-          .select()
-          .single();
-
-        if (invErr || !newInv) { results.errors.push(vehicle.registration_number); continue; }
-
-        const rcText = isReverseCharge
-          ? 'DDV v skladu S 1. Odstavkom 25. clena ZDDV-1 obracunan\nReverse Charge'
-          : '';
-
-        await supabase.from('invoice_items').insert([
-          { invoice_id: newInv.id, sort_order: 0, description: contractRefIt, line_type: 'text', quantity: 1, unit_price: 0 },
-          { invoice_id: newInv.id, sort_order: 1, description: contractRefSl, line_type: 'text', quantity: 1, unit_price: 0 },
-          { invoice_id: newInv.id, sort_order: 2, description: 'NOLEGGIO LUNGO TERMINE', line_type: 'text', quantity: 1, unit_price: 0 },
-          { invoice_id: newInv.id, sort_order: 3, description: vehicle.vehicle_name || '', line_type: 'text', quantity: 1, unit_price: 0 },
-          { invoice_id: newInv.id, sort_order: 4, description: `TARGA ${vehicle.registration_number}`, line_type: 'text', quantity: 1, unit_price: 0 },
-          { invoice_id: newInv.id, sort_order: 5, description: `CANONE MESE DI ${servicePeriod.toUpperCase()}`, line_type: 'item', quantity: 1, unit_price: subtotal },
-          { invoice_id: newInv.id, sort_order: 6, description: rcText, line_type: 'text', quantity: 1, unit_price: 0 },
-        ]);
-
-        results.created++;
-      }
-
+      const response = await fetch(settings.n8n_monthly_webhook_url!, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month: genMonth, year: genYear, triggered_by: 'App' }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!response.ok) throw new Error(`Webhook error: ${response.status}`);
+      const result = await response.json();
       setShowGenerateConfirm(false);
-      setGenerateResults(results);
+      setGenerateResults({
+        created: result.created || 0,
+        skipped: result.skipped || 0,
+        errors: result.errors || 0,
+        period: result.period || `${MONTHS[genMonth - 1]} ${genYear}`,
+      });
       await fetchInvoices();
-    } catch {
-      toast.error(t('error.generate_failed'));
+    } catch (err: unknown) {
+      clearTimeout(timeoutId);
+      if (err instanceof Error && err.name === 'AbortError') {
+        toast.error(
+          'Generiranje traja dlje kot pričakovano. Preveri stran Računi čez minuto. / ' +
+          'La generazione sta impiegando più tempo del previsto. Controlla la pagina Fatture tra un minuto.'
+        );
+      } else {
+        toast.error(t('error.generate_failed'));
+      }
     } finally {
       setGenerating(false);
     }
@@ -663,7 +632,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
         { id: newItemId(), code: '', description: vehicleName, quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
         { id: newItemId(), code: '', description: regNumber ? `TARGA ${regNumber}` : '', quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
         { id: newItemId(), code: '', description: servicePeriod ? `CANONE MESE DI ${servicePeriod.toUpperCase()}` : 'CANONE MENSILE', quantity: 1, unit_price: unitPrice, line_type: 'item', show_translation: true },
-        { id: newItemId(), code: '', description: isRC ? 'DDV v skladu S 1. Odstavkom 25. clena ZDDV-1 obracunan\nReverse Charge' : '', quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
+        { id: newItemId(), code: '', description: '', quantity: 1, unit_price: 0, line_type: 'space', show_translation: false },
       ];
     }
     if (type === 'deposit') {
@@ -848,7 +817,13 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
         total: formTotals.total,
         is_reverse_charge: form.isReverseCharge,
         status: 'draft',
-        language: (clients.find((c) => c.id === form.clientId)?.country === 'SI') ? 'sl' : 'it',
+        language: (() => {
+          const cc = clients.find((c) => c.id === form.clientId)?.country?.toUpperCase();
+          if (cc === 'SI') return 'sl';
+          if (cc === 'IT') return 'it';
+          return 'en';
+        })(),
+        input_language: form.inputLanguage,
         notes: form.notes,
         billing_month: null,
       };
@@ -894,6 +869,85 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     }
   }
 
+  async function handleSaveConfirmed() {
+    setSavingDraft(true);
+    try {
+      const settings = await getFormSettings();
+      const { data: numData, error: numErr } = await supabase
+        .rpc('get_next_invoice_number', { p_year: new Date().getFullYear() });
+      if (numErr) throw numErr;
+      const invoiceNumber = numData?.[0]?.invoice_number;
+      const sequenceNumber = numData?.[0]?.sequence_number;
+      const invoiceRecord = {
+        invoice_number: form.invoiceNumber || invoiceNumber,
+        invoice_year: currentYear,
+        invoice_sequence: sequenceNumber || 0,
+        invoice_type: form.invoiceType,
+        client_id: form.clientId || null,
+        vehicle_id: form.vehicleId || null,
+        invoice_date: form.invoiceDate,
+        service_period: form.servicePeriod,
+        due_date: form.dueDate,
+        contract_ref_it: form.contractRefIt,
+        contract_ref_sl: form.contractRefSl,
+        subtotal: formTotals.subtotal,
+        vat_rate: settings?.vat_rate ?? 22,
+        vat_amount: formTotals.vatAmount,
+        total: formTotals.total,
+        is_reverse_charge: form.isReverseCharge,
+        status: 'confirmed',
+        language: (() => {
+          const cc = clients.find((c) => c.id === form.clientId)?.country?.toUpperCase();
+          if (cc === 'SI') return 'sl';
+          if (cc === 'IT') return 'it';
+          return 'en';
+        })(),
+        input_language: form.inputLanguage,
+        notes: form.notes,
+        billing_month: null,
+      };
+
+      const { data: newInv, error } = await supabase
+        .from('invoices')
+        .insert(invoiceRecord)
+        .select()
+        .single();
+      if (error) throw error;
+
+      await supabase.from('invoice_items').insert(
+        form.items.map((item, i) => ({
+          invoice_id: newInv.id,
+          sort_order: i,
+          code: item.code || null,
+          description: item.description,
+          line_type: item.line_type,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          show_translation: item.show_translation,
+        }))
+      );
+
+      if (form.usePaymentSchedule && form.paymentSchedules.length > 0) {
+        await supabase.from('invoice_payment_schedules').insert(
+          form.paymentSchedules.map((s) => ({
+            invoice_id: newInv.id,
+            due_date: s.due_date,
+            amount: s.amount,
+            is_paid: false,
+          }))
+        );
+      }
+
+      closeManualForm();
+      await fetchInvoices();
+      toast.success('Račun potrjen / Fattura confermata');
+    } catch {
+      toast.error(t('error.save_failed'));
+    } finally {
+      setSavingDraft(false);
+    }
+  }
+
   async function handleSaveAndSend() {
     setSavingDraft(true);
     try {
@@ -921,7 +975,13 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
         total: formTotals.total,
         is_reverse_charge: form.isReverseCharge,
         status: 'confirmed',
-        language: (clients.find((c) => c.id === form.clientId)?.country === 'SI') ? 'sl' : 'it',
+        language: (() => {
+          const cc = clients.find((c) => c.id === form.clientId)?.country?.toUpperCase();
+          if (cc === 'SI') return 'sl';
+          if (cc === 'IT') return 'it';
+          return 'en';
+        })(),
+        input_language: form.inputLanguage,
         notes: form.notes,
         billing_month: null,
       };
@@ -973,6 +1033,144 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     setShowManualForm(false);
     setForm(BLANK_FORM);
     setFormStep(1);
+    setEditMode(false);
+    setEditingInvoice(null);
+  }
+
+  async function handleOpenEdit(invoice: InvoiceRecord) {
+    try {
+      const full = await fetchFullInvoice(invoice.id);
+      const clientVehicles = vehicles.filter((v) => v.client_id === full.client_id);
+      setFilteredVehicles(clientVehicles);
+      setEditMode(true);
+      setEditingInvoice(full);
+      setForm({
+        invoiceNumber: full.invoice_number,
+        invoiceDate: full.invoice_date,
+        invoiceType: full.invoice_type,
+        servicePeriod: full.service_period || '',
+        clientId: full.client_id || '',
+        vehicleId: full.vehicle_id || '',
+        contractRefIt: full.contract_ref_it || '',
+        contractRefSl: full.contract_ref_sl || '',
+        isReverseCharge: full.is_reverse_charge,
+        viesStatus: 'idle',
+        dueDate: full.due_date || '',
+        notes: full.notes || '',
+        items: (full.items || []).map((item) => ({
+          id: item.id,
+          code: item.code || '',
+          description: item.description,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          line_type: item.line_type,
+          show_translation: item.show_translation ?? true,
+        })),
+        usePaymentSchedule: (full.payment_schedules || []).length > 0,
+        paymentSchedules: (full.payment_schedules || []).map((s) => ({
+          id: s.id,
+          due_date: s.due_date,
+          amount: s.amount,
+        })),
+        inputLanguage: (full as InvoiceRecord & { input_language?: 'IT' | 'SL' }).input_language || 'IT',
+      });
+      setFormStep(2);
+      setFormPdfUrl(null);
+      setShowManualForm(true);
+    } catch {
+      toast.error(t('error.fetch_failed'));
+    }
+  }
+
+  async function handleSaveEdit() {
+    if (!editingInvoice) return;
+    setSavingDraft(true);
+    try {
+      const settings = await getFormSettings();
+
+      await supabase.from('invoices').update({
+        invoice_type: form.invoiceType,
+        invoice_date: form.invoiceDate,
+        service_period: form.servicePeriod,
+        due_date: form.dueDate,
+        contract_ref_it: form.contractRefIt,
+        contract_ref_sl: form.contractRefSl,
+        is_reverse_charge: form.isReverseCharge,
+        subtotal: formTotals.subtotal,
+        vat_rate: settings?.vat_rate ?? 22,
+        vat_amount: formTotals.vatAmount,
+        total: formTotals.total,
+        input_language: form.inputLanguage,
+        notes: form.notes,
+        updated_at: new Date().toISOString(),
+      }).eq('id', editingInvoice.id);
+
+      await supabase.from('invoice_items').delete().eq('invoice_id', editingInvoice.id);
+      await supabase.from('invoice_items').insert(
+        form.items.map((item, i) => ({
+          invoice_id: editingInvoice.id,
+          sort_order: i,
+          code: item.code || null,
+          description: item.description,
+          line_type: item.line_type,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          show_translation: item.show_translation,
+        }))
+      );
+
+      await supabase.from('invoice_payment_schedules').delete().eq('invoice_id', editingInvoice.id);
+      if (form.usePaymentSchedule && form.paymentSchedules.length > 0) {
+        await supabase.from('invoice_payment_schedules').insert(
+          form.paymentSchedules.map((s) => ({
+            invoice_id: editingInvoice.id,
+            due_date: s.due_date,
+            amount: s.amount,
+            is_paid: false,
+          }))
+        );
+      }
+
+      // Regenerate and re-upload PDF
+      const client = clients.find((c) => c.id === form.clientId) || null;
+      const vehicle = vehicles.find((v) => v.id === form.vehicleId) || null;
+      const fullInvoiceForPdf: InvoiceRecord = {
+        ...editingInvoice,
+        invoice_type: form.invoiceType,
+        invoice_date: form.invoiceDate,
+        service_period: form.servicePeriod,
+        due_date: form.dueDate,
+        contract_ref_it: form.contractRefIt,
+        contract_ref_sl: form.contractRefSl,
+        is_reverse_charge: form.isReverseCharge,
+        subtotal: formTotals.subtotal,
+        vat_rate: settings?.vat_rate ?? 22,
+        vat_amount: formTotals.vatAmount,
+        total: formTotals.total,
+        client: client as Client,
+        vehicle: vehicle as Vehicle,
+        items: formItems,
+        payment_schedules: form.usePaymentSchedule
+          ? form.paymentSchedules.map((s) => ({
+              id: s.id, invoice_id: editingInvoice.id,
+              due_date: s.due_date, amount: s.amount,
+              is_paid: false, paid_at: null, notes: null,
+            }))
+          : [],
+      };
+      const pdfBlob = await generateInvoicePDF(fullInvoiceForPdf, settings);
+      const pdfPath = `invoices/${editingInvoice.invoice_year}/${editingInvoice.invoice_number.replace('/', '-')}.pdf`;
+      await supabase.storage.from('invoice-pdfs').upload(pdfPath, pdfBlob, { contentType: 'application/pdf', upsert: true });
+      await supabase.from('invoices').update({ pdf_path: pdfPath }).eq('id', editingInvoice.id);
+
+      closeManualForm();
+      await fetchInvoices();
+      toast.success('Račun posodobljen / Fattura aggiornata');
+    } catch {
+      toast.error(t('error.save_failed'));
+    } finally {
+      setSavingDraft(false);
+    }
   }
 
   const years = [currentYear - 1, currentYear, currentYear + 1];
@@ -1023,18 +1221,19 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
           />
           {/* Actions */}
           <button
-            onClick={() => { setShowManualForm(true); initManualForm(); }}
+            onClick={handleGenerateMonthlyClick}
+            disabled={generating}
             className="btn-secondary text-sm flex items-center gap-1.5"
-          >
-            <Plus size={15} />
-            {t('inv.new_manual')}
-          </button>
-          <button
-            onClick={() => setShowGenerateConfirm(true)}
-            className="btn-primary text-sm flex items-center gap-1.5"
           >
             <FileText size={15} />
             {t('inv.generate_monthly')}
+          </button>
+          <button
+            onClick={() => { setShowManualForm(true); initManualForm(); }}
+            className="btn-primary text-sm flex items-center gap-1.5"
+          >
+            <Plus size={15} />
+            {t('inv.new_manual')}
           </button>
         </div>
       </div>
@@ -1117,7 +1316,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((inv) => (
+                {paginatedInvoices.map((inv) => (
                   <tr
                     key={inv.id}
                     className={`table-row ${inv.status === 'cancelled' ? 'opacity-50' : ''}`}
@@ -1159,6 +1358,13 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                           title={t('inv.preview')}
                         >
                           <Eye size={15} strokeWidth={1.8} />
+                        </button>
+                        <button
+                          onClick={() => handleOpenEdit(inv)}
+                          className="p-1.5 rounded hover:bg-accent-soft text-text-muted hover:text-primary transition-colors"
+                          title="Uredi / Modifica"
+                        >
+                          <Pencil size={15} strokeWidth={1.8} />
                         </button>
                         {(inv.status === 'draft' || inv.status === 'confirmed') && (
                           <button
@@ -1204,6 +1410,65 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
         )}
       </div>
 
+      {/* ---- Pagination ---- */}
+      {!loading && totalPages > 1 && (
+        <div className="flex items-center justify-between gap-4 pt-2">
+          <span className="text-xs text-text-muted">
+            {t('pagination.showing')
+              .replace('{from}', String((currentPage - 1) * PAGE_SIZE + 1))
+              .replace('{to}', String(Math.min(currentPage * PAGE_SIZE, filtered.length)))
+              .replace('{total}', String(filtered.length))}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setCurrentPage((p) => p - 1)}
+              disabled={currentPage === 1}
+              className="flex items-center gap-1 px-2 py-1.5 text-sm rounded hover:bg-accent-soft disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft size={15} strokeWidth={1.8} />
+              {t('pagination.previous')}
+            </button>
+
+            {(() => {
+              const pages: (number | 'gap')[] = [];
+              for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || Math.abs(i - currentPage) <= 2) {
+                  pages.push(i);
+                } else if (pages[pages.length - 1] !== 'gap') {
+                  pages.push('gap');
+                }
+              }
+              return pages.map((p, idx) =>
+                p === 'gap' ? (
+                  <span key={`gap-${idx}`} className="px-1 text-text-muted text-sm">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => setCurrentPage(p)}
+                    className={`min-w-[2rem] h-8 px-2 rounded text-sm font-medium transition-colors border ${
+                      p === currentPage
+                        ? 'bg-primary text-white border-primary'
+                        : 'bg-white border-accent-muted hover:bg-accent-soft'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                )
+              );
+            })()}
+
+            <button
+              onClick={() => setCurrentPage((p) => p + 1)}
+              disabled={currentPage === totalPages}
+              className="flex items-center gap-1 px-2 py-1.5 text-sm rounded hover:bg-accent-soft disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              {t('pagination.next')}
+              <ChevronRight size={15} strokeWidth={1.8} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ===== MODALS ===== */}
 
       {/* ---- Generate confirm modal ---- */}
@@ -1230,18 +1495,23 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
               </select>
             </div>
             <p className="text-sm text-text-muted mb-1">
-              Generare le fatture per <strong>{MONTHS[genMonth - 1]} {genYear}</strong>?
+              {t('inv.generate_confirm_title').replace('?', '')} — <strong>{MONTHS[genMonth - 1]} {genYear}</strong>
             </p>
             <p className="text-xs text-text-muted mb-4">
-              Verranno create fatture per tutti i veicoli attivi.<br />
-              I veicoli che hanno già una fattura per questo mese verranno saltati.
+              {t('inv.generate_confirm_body')}
             </p>
+            {generating && (
+              <p className="text-xs text-text-muted mb-3">
+                To lahko traja do 30 sekund / Potrebbe richiedere fino a 30 secondi
+              </p>
+            )}
             <div className="flex justify-end gap-3">
-              <button onClick={() => setShowGenerateConfirm(false)} className="btn-secondary">
+              <button onClick={() => setShowGenerateConfirm(false)} className="btn-secondary" disabled={generating}>
                 {t('btn.cancel')}
               </button>
-              <button onClick={handleGenerateMonthly} disabled={generating} className="btn-primary">
-                {generating ? t('inv.generating') : 'Genera'}
+              <button onClick={handleGenerateMonthly} disabled={generating} className="btn-primary flex items-center gap-2">
+                {generating && <span className="spinner w-3.5 h-3.5" />}
+                {generating ? t('inv.generating') : t('inv.generate_monthly')}
               </button>
             </div>
           </div>
@@ -1252,19 +1522,32 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       {generateResults && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setGenerateResults(null)}>
           <div className="bg-white rounded-10 shadow-xl p-6 max-w-sm w-full animate-slideIn" onClick={(e) => e.stopPropagation()}>
-            <h3 className="section-title mb-4">{t('inv.monthly_generated')}</h3>
-            <div className="space-y-2 text-sm mb-5">
-              <p>✅ {t('inv.monthly_generated')} <strong>{generateResults.created}</strong></p>
-              <p>⏭ Già esistenti: <strong>{generateResults.skipped}</strong></p>
-              <p>❌ Errori: <strong>{generateResults.errors.length}</strong>
-                {generateResults.errors.length > 0 && (
-                  <span className="text-xs text-text-muted ml-1">({generateResults.errors.join(', ')})</span>
-                )}
-              </p>
+            <h3 className="section-title mb-4">
+              {t('inv.generate_result_title')} — {generateResults.period}
+            </h3>
+            <div className="space-y-2 text-sm mb-2">
+              <p>✅ {t('inv.generate_created')}: <strong>{generateResults.created}</strong></p>
+              <p>⏭ {t('inv.generate_skipped')}: <strong>{generateResults.skipped}</strong></p>
+              <p>❌ {t('inv.generate_errors')}: <strong>{generateResults.errors}</strong></p>
             </div>
-            <div className="flex justify-end">
-              <button onClick={() => setGenerateResults(null)} className="btn-primary">
+            <p className="text-xs text-text-muted mb-1">{t('inv.draft_status_note')}</p>
+            <p className="text-xs text-text-muted mb-5">
+              Pojdi na stran Računi za pregled in pošiljanje. / Vai alla pagina Fatture per revisione e invio.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setGenerateResults(null)} className="btn-secondary">
                 {t('common.close')}
+              </button>
+              <button
+                onClick={() => {
+                  setFilterStatus('draft');
+                  setFilterMonth(genMonth);
+                  setFilterYear(genYear);
+                  setGenerateResults(null);
+                }}
+                className="btn-primary"
+              >
+                {t('inv.go_to_invoices')}
               </button>
             </div>
           </div>
@@ -1339,22 +1622,31 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                 </div>
               )}
             </div>
-            <div className="flex items-center justify-end gap-3 px-5 py-3 border-t border-accent-soft">
-              <button onClick={closePreview} className="btn-secondary text-sm">{t('common.close')}</button>
-              <button onClick={() => handleDownload(previewInvoice)} className="btn-secondary text-sm">
-                <Download size={14} className="inline mr-1" />
-                {t('inv.download')}
+            <div className="flex items-center justify-between px-5 py-3 border-t border-accent-soft">
+              <button
+                onClick={() => { closePreview(); handleOpenEdit(previewInvoice); }}
+                className="btn-secondary text-sm flex items-center gap-1.5"
+                title="Uredi / Modifica"
+              >
+                <Pencil size={14} strokeWidth={1.8} />
+                Uredi / Modifica
               </button>
-              {previewInvoice.status === 'draft' && (
-                <button onClick={() => handleConfirm(previewInvoice)} className="btn-primary text-sm">
-                  {t('inv.confirm')}
+              <div className="flex items-center gap-3">
+                <button onClick={() => handleDownload(previewInvoice)} className="btn-secondary text-sm">
+                  <Download size={14} className="inline mr-1" />
+                  {t('inv.download')}
                 </button>
-              )}
-              {(previewInvoice.status === 'draft' || previewInvoice.status === 'confirmed') && (
-                <button onClick={() => { closePreview(); setSendTarget(previewInvoice); }} className="btn-primary text-sm">
-                  {t('inv.send')}
-                </button>
-              )}
+                {previewInvoice.status === 'draft' && (
+                  <button onClick={() => handleConfirm(previewInvoice)} className="btn-primary text-sm">
+                    {t('inv.confirm')}
+                  </button>
+                )}
+                {(previewInvoice.status === 'draft' || previewInvoice.status === 'confirmed') && (
+                  <button onClick={() => { closePreview(); setSendTarget(previewInvoice); }} className="btn-primary text-sm">
+                    {t('inv.send')}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1371,7 +1663,9 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
             {/* Modal header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-accent-soft flex-shrink-0">
               <div className="flex items-center gap-4">
-                <h3 className="section-title">{t('inv.new_manual')}</h3>
+                <h3 className="section-title">
+                  {editMode ? 'Uredi račun / Modifica fattura' : t('inv.new_manual')}
+                </h3>
                 <div className="flex gap-1">
                   {[1, 2, 3].map((s) => (
                     <div key={s} className={`w-6 h-1.5 rounded-full transition-colors ${formStep >= s ? 'bg-primary' : 'bg-gray-200'}`} />
@@ -1534,11 +1828,40 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
               {/* ---- Step 2 ---- */}
               {formStep === 2 && (
                 <div className="space-y-4">
+                  {/* Input language selector */}
+                  <div className="flex items-center gap-2 text-xs text-text-muted">
+                    <span>Lingua input / Jezik vnosa:</span>
+                    <button
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, inputLanguage: 'IT' }))}
+                      className={`px-2.5 py-1 rounded-full border text-xs font-medium transition-colors ${
+                        form.inputLanguage === 'IT'
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-text-muted border-accent-soft hover:border-blue-400'
+                      }`}
+                    >
+                      🇮🇹 Italiano
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, inputLanguage: 'SL' }))}
+                      className={`px-2.5 py-1 rounded-full border text-xs font-medium transition-colors ${
+                        form.inputLanguage === 'SL'
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-text-muted border-accent-soft hover:border-blue-400'
+                      }`}
+                    >
+                      🇸🇮 Slovensko
+                    </button>
+                  </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-accent-soft">
                           <th className="text-left py-2 pr-2 text-xs font-medium text-text-muted w-6">#</th>
+                          <th className="text-left py-2 pr-2 text-xs font-medium text-text-muted w-20" title="Koda bo kasneje povezana s Supabase tabelo / Il codice sarà collegato in seguito">
+                            Koda / Codice
+                          </th>
                           <th className="text-left py-2 pr-2 text-xs font-medium text-text-muted">{t('inv.description')}</th>
                           <th className="text-center py-2 pr-2 text-xs font-medium text-text-muted w-16">{t('inv.quantity')}</th>
                           <th className="text-right py-2 pr-2 text-xs font-medium text-text-muted w-24">{t('inv.unit_price')}</th>
@@ -1552,6 +1875,24 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                         {form.items.map((item, idx) => (
                           <tr key={item.id} className="border-b border-gray-50">
                             <td className="py-1.5 pr-2 text-text-muted text-xs">{idx + 1}</td>
+                            <td className="py-1.5 pr-2">
+                              {/* TODO: Connect code field to Supabase `invoice_codes` table
+                                  Table structure needed: invoice_codes (code TEXT PK, description_sl TEXT, description_it TEXT)
+                                  When user types a code, lookup description and auto-fill the description field
+                                  Tim will create this table together with developer */}
+                              <input
+                                type="text"
+                                value={item.code || ''}
+                                maxLength={20}
+                                placeholder="npr. M001"
+                                onChange={(e) => setForm((f) => ({
+                                  ...f,
+                                  items: f.items.map((i) => i.id === item.id ? { ...i, code: e.target.value } : i),
+                                }))}
+                                className="input-field py-1 text-xs w-full"
+                                style={{ maxWidth: 80 }}
+                              />
+                            </td>
                             <td className="py-1.5 pr-2">
                               <textarea
                                 value={item.description}
@@ -1790,19 +2131,41 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                     Avanti →
                   </button>
                 )}
-                {formStep === 3 && (
+                {formStep === 3 && !editMode && (
                   <>
-                    <button onClick={handleSaveDraft} disabled={savingDraft} className="btn-secondary text-sm">
-                      {savingDraft ? t('common.loading') : t('inv.save_draft')}
+                    <button
+                      onClick={handleSaveDraft}
+                      disabled={savingDraft}
+                      className="btn-secondary text-sm"
+                      style={{ background: '#f3f4f6', color: '#374151' }}
+                    >
+                      {savingDraft ? t('common.loading') : '💾 Shrani osnutek / Salva bozza'}
+                    </button>
+                    <button
+                      onClick={handleSaveConfirmed}
+                      disabled={savingDraft}
+                      className="btn-secondary text-sm"
+                      style={{ background: 'var(--color-accent-soft)', color: 'var(--color-primary)', border: '1px solid var(--color-accent)' }}
+                    >
+                      {savingDraft ? t('common.loading') : '✓ Potrdi / Conferma'}
                     </button>
                     <button
                       onClick={handleSaveAndSend}
                       disabled={savingDraft}
                       className="btn-primary text-sm"
                     >
-                      {savingDraft ? t('common.loading') : 'Conferma e invia →'}
+                      {savingDraft ? t('common.loading') : '✓ Potrdi in pošlji / Conferma e invia'}
                     </button>
                   </>
+                )}
+                {formStep === 3 && editMode && (
+                  <button
+                    onClick={handleSaveEdit}
+                    disabled={savingDraft}
+                    className="btn-primary text-sm"
+                  >
+                    {savingDraft ? t('common.loading') : '💾 Shrani spremembe / Salva modifiche'}
+                  </button>
                 )}
               </div>
             </div>

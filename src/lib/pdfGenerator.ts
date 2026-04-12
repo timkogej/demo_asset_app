@@ -4,9 +4,12 @@ import type { InvoiceRecord, Settings } from '../types';
 import { supabase } from './supabase';
 import {
   getSecondaryLanguage,
-  translateStatic,
-  translateServicePeriod,
-  translateWithDeepL,
+  biLabel,
+  getBilingualPeriod,
+  translateITtoSL,
+  translateSLtoSecondary,
+  translateWithDatePreservation,
+  normalizeSLtoIT,
   type InvoiceLang,
 } from './invoiceTranslator';
 
@@ -72,6 +75,47 @@ async function fetchLogoBase64(url: string): Promise<string | null> {
   }
 }
 
+// ─── TAX LABEL ───────────────────────────────────────────────────────────────
+function getTaxLabel(secondaryLang: InvoiceLang | null): string {
+  if (!secondaryLang) return 'ID za DDV';
+  if (secondaryLang === 'IT') return 'ID za DDV / P. IVA';
+  return 'ID za DDV / VAT ID';
+}
+
+// ─── PAYMENT METHOD SL TRANSLATION ───────────────────────────────────────────
+function getPaymentMethodSL(method: string): string {
+  const methodMap: Record<string, string> = {
+    'BONIFICO BANCARIO': 'BANCNO NAKAZILO',
+    'bonifico bancario': 'bancno nakazilo',
+    'Bonifico bancario': 'Bancno nakazilo',
+    'BONIFICO': 'BANCNO NAKAZILO',
+    'CONTANTI': 'GOTOVINA',
+    'CARTA DI CREDITO': 'KREDITNA KARTICA',
+    'ASSEGNO': 'CEK',
+    'PAYPAL': 'PAYPAL',
+  };
+  return methodMap[method] || method;
+}
+
+// ─── REVERSE CHARGE DISCLAIMER TEXT ──────────────────────────────────────────
+function getReverseChargeText(secondaryLang: InvoiceLang | null): string[] {
+  const slText = 'DDV v skladu s 1. odstavkom 25. clena ZDDV-1 obracunan';
+  const rcText = 'Reverse Charge';
+
+  if (!secondaryLang) {
+    return [slText, rcText];
+  }
+  if (secondaryLang === 'IT') {
+    const itText = 'IVA ai sensi dell\'art. 25 comma 1 dello ZDDV-1 applicata';
+    return [slText, rcText, itText, rcText];
+  }
+  if (secondaryLang === 'EN') {
+    const enText = 'VAT pursuant to Art. 25 para. 1 of ZDDV-1 applied';
+    return [slText, rcText, enText, rcText];
+  }
+  return [slText, rcText];
+}
+
 // ─── MAIN PDF GENERATOR ──────────────────────────────────────────────────────
 export async function generateInvoicePDF(
   invoice: InvoiceRecord,
@@ -79,17 +123,14 @@ export async function generateInvoicePDF(
 ): Promise<Blob> {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
-  // Determine languages
-  const secondaryLang: InvoiceLang = getSecondaryLanguage(invoice.client?.country || null);
-  const showSecondary = secondaryLang !== 'IT';
+  // Determine languages — primary is always SL, secondary depends on client country
+  const secondaryLang: InvoiceLang | null = getSecondaryLanguage(invoice.client?.country || null);
 
-  // Helper: bilingual label — "Italian / Secondary"
-  const bi = (itText: string): string => {
-    if (!showSecondary) return sanitize(itText);
-    const sec = translateStatic(itText, secondaryLang);
-    if (sec === itText) return sanitize(itText);
-    return sanitize(itText) + ' / ' + sanitize(sec);
-  };
+  // Helper: bilingual label (SL primary, secondary after "/" — or just SL if no secondary)
+  const bi = (slText: string): string => sanitize(biLabel(slText, secondaryLang));
+
+  // input_language tells us what language the item descriptions are stored in
+  const inputLang = (invoice as InvoiceRecord & { input_language?: string }).input_language || 'IT';
 
   const marginL = 15;
   const marginR = 195;
@@ -121,75 +162,102 @@ export async function generateInvoicePDF(
 
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.text(bi('RACUN ST.:'), marginL + 2, boxY + 6);
-  doc.text('FATTURA N.:', marginL + 2, boxY + 11);
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text(sanitize(invoice.invoice_number), marginL + 35, boxY + 9);
-  doc.setFont('helvetica', 'normal');
+  if (!secondaryLang) {
+    // SL only — single row, number on same line
+    doc.text('RACUN ST.:', marginL + 2, boxY + 12);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text(sanitize(invoice.invoice_number), marginL + 28, boxY + 12);
+    doc.setFont('helvetica', 'normal');
+  } else {
+    // Bilingual — SL on top, secondary below — NO "/" separator
+    doc.text('RACUN ST.:', marginL + 2, boxY + 7);
+    const secNumberLabel = secondaryLang === 'IT' ? 'FATTURA N.' : 'INVOICE NO.';
+    doc.text(secNumberLabel, marginL + 2, boxY + 14);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text(sanitize(invoice.invoice_number), marginL + 35, boxY + 11);
+    doc.setFont('helvetica', 'normal');
+  }
 
   // ─── CLIENT BOX (right) ──────────────────────────────────────────────────
   const client = invoice.client;
   const clientLines: string[] = [];
-  const clientName = sanitize(client?.company_name_additional || client?.company_name || '');
-  const clientNameAdd = sanitize(client?.company_name || '');
 
+  const clientName = sanitize(
+    client?.company_name ||
+    client?.company_name_additional ||
+    ''
+  );
   if (clientName) clientLines.push(clientName);
-  if (clientNameAdd && clientNameAdd !== clientName) clientLines.push(clientNameAdd);
-  if (client?.address) clientLines.push(sanitize(client.address));
 
-  const cityLine = [client?.postal_code, client?.city, client?.country]
-    .filter(Boolean)
-    .map(sanitize)
-    .join(' - ');
+  const clientNameAdd = sanitize(client?.company_name_additional || '');
+  if (clientNameAdd && clientNameAdd !== clientName) clientLines.push(clientNameAdd);
+
+  const address = sanitize(client?.address || '');
+  if (address) clientLines.push(address);
+
+  const postalCode = sanitize(client?.postal_code || '');
+  const city = sanitize(client?.city || '');
+  const country = sanitize(client?.country || '');
+  const cityLine = [postalCode, city, country].filter(v => v.length > 0).join(' - ');
   if (cityLine) clientLines.push(cityLine);
 
   if (client?.registration_number) {
     clientLines.push(`C.F. ${sanitize(client.registration_number)}`);
   }
   if (client?.tax_number) {
-    clientLines.push(`P.IVA ${sanitize(client.tax_number)}`);
+    clientLines.push(`${getTaxLabel(secondaryLang)} ${sanitize(client.tax_number)}`);
   }
 
-  // Box height: 5mm per line + 4mm padding, minimum 22mm
-  const clientBoxHeight = Math.max(22, clientLines.length * 5 + 6);
+  const lineHeight = 4.5;
+  const clientBoxPadding = 5;
+  const clientBoxHeight = Math.max(24, clientLines.length * lineHeight + clientBoxPadding);
   doc.rect(110, boxY, 85, clientBoxHeight);
 
   clientLines.forEach((line, i) => {
     doc.setFontSize(i === 0 ? 8.5 : 7.5);
     doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
-    doc.text(line, 112, boxY + 5 + i * 5);
+    const maxWidth = 82;
+    const textWidth = doc.getTextWidth(line);
+    const displayLine = textWidth > maxWidth
+      ? line.substring(0, Math.floor(line.length * maxWidth / textWidth) - 2) + '..'
+      : line;
+    doc.text(displayLine, 112, boxY + clientBoxPadding + (i * lineHeight));
   });
   doc.setFont('helvetica', 'normal');
 
   y = boxY + Math.max(22, clientBoxHeight) + 4;
 
   // ─── DATE ROW ────────────────────────────────────────────────────────────
+  const dateRowY = y;
   doc.setLineWidth(0.3);
-  doc.rect(marginL, y, 65, 14);
+  doc.rect(marginL, dateRowY, 65, 14);
   doc.setFontSize(7.5);
-  doc.text(bi('Datum racuna'), marginL + 2, y + 5);
-  doc.text('Data fattura', marginL + 2, y + 10);
-  doc.setFontSize(10);
-  doc.text(formatDateIT(invoice.invoice_date), marginL + 38, y + 8);
+  if (!secondaryLang) {
+    // SL only — single row, date on same line
+    doc.text('Datum racuna:', marginL + 2, dateRowY + 8);
+    doc.setFontSize(10);
+    doc.text(formatDateIT(invoice.invoice_date), marginL + 36, dateRowY + 8);
+  } else {
+    // Bilingual — SL top, secondary below — NO "/" separator
+    doc.text('Datum racuna', marginL + 2, dateRowY + 5);
+    const secDateLabel = secondaryLang === 'IT' ? 'Data fattura' : 'Invoice date';
+    doc.text(secDateLabel, marginL + 2, dateRowY + 10);
+    doc.setFontSize(10);
+    doc.text(formatDateIT(invoice.invoice_date), marginL + 38, dateRowY + 8);
+  }
 
   if (invoice.service_period) {
-    const serviceLabel = 'Datum opr. Storitev: / Data prest. Servizi:';
-    doc.setFontSize(7.5);
+    const serviceLabel = sanitize(bi('Datum opr. Storitev:'));
+    doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    doc.text(sanitize(serviceLabel), 85, y + 5);
-    // Build bilingual service period: "Aprile/April 2026"
-    const translated = translateServicePeriod(invoice.service_period, secondaryLang);
-    let bilingualPeriod = invoice.service_period;
-    if (translated !== invoice.service_period) {
-      const itMonth = invoice.service_period.split(' ')[0];
-      const slMonth = translated.split(' ')[0];
-      const year = invoice.service_period.split(' ')[1] || '';
-      bilingualPeriod = `${itMonth}/${slMonth} ${year}`;
-    }
+    doc.text(serviceLabel, 83, y + 5);
+    const biPeriod = getBilingualPeriod(invoice.service_period, secondaryLang);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
-    doc.text(sanitize(bilingualPeriod), 155, y + 5);
+    const labelWidth = doc.getTextWidth(serviceLabel);
+    doc.text(sanitize(biPeriod), 83 + labelWidth + 3, y + 5);
     doc.setFont('helvetica', 'normal');
   }
 
@@ -198,23 +266,35 @@ export async function generateInvoicePDF(
   // ─── ITEMS TABLE ─────────────────────────────────────────────────────────
   const items = invoice.items || [];
 
-  // Translate dynamic item descriptions using DeepL if needed
-  const translatedDescriptions: Record<string, string> = {};
-  if (showSecondary && settings.deepl_webhook_url) {
-    for (const item of items) {
-      if (item.line_type === 'item' || item.line_type === 'text') {
-        const staticTrans = translateStatic(item.description, secondaryLang);
-        if (staticTrans !== item.description) {
-          translatedDescriptions[item.id] = staticTrans;
-        } else {
-          // Use DeepL via n8n proxy for custom descriptions
-          const deepLTrans = await translateWithDeepL(
-            item.description,
-            secondaryLang as 'SL' | 'EN',
-            settings.deepl_webhook_url
-          );
-          translatedDescriptions[item.id] = deepLTrans;
+  // Translate descriptions: IT input → SL primary, then SL → secondary
+  const slDescriptions: Record<string, string> = {};
+  const secDescriptions: Record<string, string> = {};
+
+  for (const item of items) {
+    if (item.line_type === 'space') continue;
+
+    // Step 1: get SL primary text
+    const slText = inputLang === 'SL'
+      ? item.description
+      : await translateITtoSL(item.description, settings.deepl_webhook_url || '');
+    slDescriptions[item.id] = slText;
+
+    // Step 2: get secondary text (only if client is not SI)
+    if (secondaryLang) {
+      let secText: string;
+      if (secondaryLang === 'IT') {
+        // Try static normalization SL → IT first
+        secText = normalizeSLtoIT(slText);
+        // If no change, fall back to DeepL with date preservation
+        if (secText === slText && settings.deepl_webhook_url) {
+          secText = await translateWithDatePreservation(slText, 'IT', settings.deepl_webhook_url);
         }
+      } else {
+        // EN: use DeepL with date preservation
+        secText = await translateWithDatePreservation(slText, 'EN', settings.deepl_webhook_url || '');
+      }
+      if (secText !== slText) {
+        secDescriptions[item.id] = secText;
       }
     }
   }
@@ -228,16 +308,16 @@ export async function generateInvoicePDF(
       continue;
     }
 
-    const primaryDesc = sanitize(item.description);
-    const showTrans = item.show_translation !== false; // default true
+    const primaryDesc = sanitize(slDescriptions[item.id] ?? item.description);
+    const showTrans = item.show_translation !== false;
     const secondaryDesc =
-      showSecondary && showTrans
-        ? sanitize(translatedDescriptions[item.id] || '')
+      showTrans && secondaryLang
+        ? sanitize(secDescriptions[item.id] || '')
         : '';
 
     const descContent =
       secondaryDesc && secondaryDesc !== primaryDesc
-        ? { content: `${primaryDesc}\n${secondaryDesc}`, styles: { fontSize: 7.5, cellPadding: { top: 1.5, right: 2, bottom: 1.5, left: 2 } } }
+        ? { content: primaryDesc + '\n' + secondaryDesc, styles: { fontSize: 7, cellPadding: { top: 1.5, right: 2, bottom: 1.5, left: 2 } } }
         : { content: primaryDesc, styles: { fontSize: 7.5 } };
 
     if (item.line_type === 'text') {
@@ -259,13 +339,25 @@ export async function generateInvoicePDF(
     }
   }
 
-  // Column headers — bilingual
+  // Reverse charge disclaimer row
+  if (invoice.is_reverse_charge) {
+    const rcLines = getReverseChargeText(secondaryLang);
+    tableBody.push([
+      { content: '' },
+      { content: rcLines.join('\n'), styles: { fontSize: 7, fontStyle: 'italic' } },
+      { content: '' },
+      { content: '' },
+      { content: '' },
+    ]);
+  }
+
+  // Column headers — SL primary with secondary after "/"
   const headers = [
-    sanitize(bi('cod')),
-    sanitize(bi('descrizione')),
-    sanitize(bi('q.ta')),
-    sanitize(bi('prezzo u.')),
-    sanitize(bi('totale')),
+    bi('koda'),
+    bi('opis'),
+    bi('kol.'),
+    bi('cena/enoto'),
+    bi('skupaj'),
   ];
 
   autoTable(doc, {
@@ -304,20 +396,28 @@ export async function generateInvoicePDF(
 
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
-  doc.text(sanitize(bi('netto')), totalsX, y);
+  doc.text(bi('neto'), totalsX, y);
   doc.text(`${formatCurrency(invoice.subtotal)} EUR`, marginR, y, { align: 'right' });
   y += 5;
 
-  doc.text(`IVA / DDV ${invoice.vat_rate || 22}%`, totalsX, y);
-  doc.text(
-    invoice.is_reverse_charge ? '' : `${formatCurrency(invoice.vat_amount)} EUR`,
-    marginR, y, { align: 'right' }
-  );
+  if (invoice.is_reverse_charge) {
+    const vatLabel = secondaryLang === 'IT' ? 'DDV / IVA 0%'
+      : secondaryLang === 'EN' ? 'DDV / VAT 0%'
+      : 'DDV 0%';
+    doc.text(vatLabel, totalsX, y);
+    doc.text('0,00 EUR', marginR, y, { align: 'right' });
+  } else {
+    const vatLabel = secondaryLang === 'IT' ? `DDV / IVA ${invoice.vat_rate || 22}%`
+      : secondaryLang === 'EN' ? `DDV / VAT ${invoice.vat_rate || 22}%`
+      : `DDV ${invoice.vat_rate || 22}%`;
+    doc.text(vatLabel, totalsX, y);
+    doc.text(`${formatCurrency(invoice.vat_amount)} EUR`, marginR, y, { align: 'right' });
+  }
   y += 5;
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  doc.text(sanitize(bi('TOTALE')), totalsX, y);
+  doc.text(bi('SKUPAJ'), totalsX, y);
   doc.text(`${formatCurrency(invoice.total)} EUR`, marginR, y, { align: 'right' });
   doc.setFont('helvetica', 'normal');
 
@@ -326,48 +426,62 @@ export async function generateInvoicePDF(
   const payX = marginL;
   const labelW = 32;
   const valueW = 58;
-  const rowH = 6;
+  const rowH = 8;
+
+  const slPayMethod = getPaymentMethodSL(settings.payment_method || 'BONIFICO BANCARIO');
+  const payMethodValue = secondaryLang === 'IT'
+    ? `${slPayMethod}\n${settings.payment_method || 'BONIFICO BANCARIO'}`
+    : secondaryLang === 'EN'
+      ? `${slPayMethod}\nBANK TRANSFER`
+      : slPayMethod;
+  const placiloLabel = secondaryLang
+    ? `PLACILO /\n${secondaryLang === 'IT' ? 'PAGAMENTO' : 'PAYMENT'}`
+    : 'PLACILO';
+  const rokPlacilaLabel = secondaryLang
+    ? `ROK PLACILA /\n${secondaryLang === 'IT' ? 'SCADENZA' : 'DUE DATE'}`
+    : 'ROK PLACILA';
 
   const payRows =
     invoice.payment_schedules && invoice.payment_schedules.length > 0
       ? [
-          [bi('IBAN'), sanitize(settings.iban || '')],
-          [bi('SWIFT'), sanitize(settings.swift || '')],
-          [bi('PAGAMENTO'), sanitize(settings.payment_method || 'BONIFICO BANCARIO')],
+          ['IBAN', sanitize(settings.iban || '')],
+          ['SWIFT', sanitize(settings.swift || '')],
+          [placiloLabel, payMethodValue],
           ...invoice.payment_schedules.map((s, i) => [
-            i === 0 ? 'SCADENZA /\nROK PLACILA' : '',
+            i === 0 ? rokPlacilaLabel : '',
             `${formatDateIT(s.due_date)} EUR ${formatCurrency(s.amount)}`,
           ]),
         ]
       : [
-          [bi('IBAN'), sanitize(settings.iban || '')],
-          [bi('SWIFT'), sanitize(settings.swift || '')],
-          [bi('PAGAMENTO'), sanitize(settings.payment_method || 'BONIFICO BANCARIO')],
-          ['SCADENZA /\nROK PLACILA', invoice.due_date ? formatDateIT(invoice.due_date) : ''],
+          ['IBAN', sanitize(settings.iban || '')],
+          ['SWIFT', sanitize(settings.swift || '')],
+          [placiloLabel, payMethodValue],
+          [rokPlacilaLabel, invoice.due_date ? formatDateIT(invoice.due_date) : ''],
         ];
 
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   payRows.forEach((row, i) => {
     const rowY = payStartY + (i * rowH);
     if (row[0]) {
-      const lines = row[0].split('\n');
-      lines.forEach((line, li) => {
+      const labelLines = row[0].split('\n');
+      labelLines.forEach((line, li) => {
         doc.text(sanitize(line), payX, rowY + 3 + (li * 3.5));
       });
     }
     doc.rect(payX + labelW, rowY, valueW, rowH);
-    doc.text(sanitize(row[1]), payX + labelW + 2, rowY + 4);
+    const valueLines = row[1].split('\n');
+    valueLines.forEach((vline, vli) => {
+      doc.text(sanitize(vline), payX + labelW + 2, rowY + 3 + (vli * 3.5));
+    });
   });
 
   // ─── FOOTER ──────────────────────────────────────────────────────────────
   const footerY = 268;
 
-  // Varent logo (centered above footer)
   if (varentLogoBase64) {
     doc.addImage(varentLogoBase64, 'JPEG', 77, footerY - 18, 55, 16);
   }
 
-  // Footer text (center)
   doc.setFontSize(6.5);
   doc.setFont('helvetica', 'bold');
   doc.text('MANUTECNICA D.O.O.', 105, footerY + 6, { align: 'center' });

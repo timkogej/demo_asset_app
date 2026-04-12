@@ -179,6 +179,7 @@ export interface InvoiceRecord {
   pdf_url: string | null;
   pdf_path: string | null;
   language: string;
+  input_language: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -212,6 +213,7 @@ export interface Settings {
   contract_ref_sl: string | null;
   payment_due_days: number | null;
   n8n_webhook_url: string | null;
+  n8n_monthly_webhook_url: string | null;
   vies_webhook_url: string | null;
   cc_email: string | null;
   email_subject_it: string | null;

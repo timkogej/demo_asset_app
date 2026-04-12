@@ -83,6 +83,7 @@ export default function Settings({ t }: SettingsProps) {
     contract_ref_sl: '',
     payment_due_days: 14,
     n8n_webhook_url: '',
+    n8n_monthly_webhook_url: '',
     vies_webhook_url: '',
     cc_email: '',
     email_subject_it: '',
@@ -691,6 +692,24 @@ export default function Settings({ t }: SettingsProps) {
                 >
                   {testingWebhook ? t('common.loading') : 'Testa webhook / Testiraj webhook'}
                 </button>
+              </div>
+
+              {/* Monthly generation webhook */}
+              <div>
+                <FieldLabel text={t('settings.n8n_monthly_webhook')} />
+                <input
+                  type="url"
+                  className="input-field w-full"
+                  value={form.n8n_monthly_webhook_url ?? ''}
+                  onChange={(e) => handleChange('n8n_monthly_webhook_url', e.target.value)}
+                  placeholder="https://tikej.app.n8n.cloud/webhook/generate-monthly-invoices"
+                />
+                <div
+                  className="mt-2 p-3 rounded-10 text-xs text-text-muted"
+                  style={{ background: '#f8faf8', border: '1px solid #e8f0eb' }}
+                >
+                  Questo URL viene chiamato per generare le fatture mensili / Ta URL se pokliče za generiranje mesečnih računov
+                </div>
               </div>
 
               {/* VIES webhook */}

@@ -3,8 +3,6 @@ import {
   LayoutDashboard,
   Car,
   Users,
-  AlertTriangle,
-  CreditCard,
   BarChart2,
   FolderOpen,
   Settings,
@@ -33,8 +31,6 @@ const navItems = [
   { path: '/vehicles', label: 'nav.vehicles', icon: Car, end: false },
   { path: '/clients', label: 'nav.clients', icon: Users, end: false },
   { path: '/invoices', label: 'nav.invoices', icon: FileText, end: false },
-  { path: '/penalties', label: 'nav.penalties', icon: AlertTriangle, end: false },
-  { path: '/payments', label: 'nav.payments', icon: CreditCard, end: false },
   { path: '/analytics', label: 'nav.analytics', icon: BarChart2, end: false },
   { path: '/documents', label: 'nav.documents', icon: FolderOpen, end: false },
 ];
