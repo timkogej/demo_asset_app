@@ -282,6 +282,9 @@ function CodeInput({ value, onChange, onCodeSelect, codes }: {
   codes: InvoiceCode[];
 }) {
   const [showDropdown, setShowDropdown] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
+
   const filtered = value.length > 0
     ? codes.filter(c =>
         c.code.toLowerCase().includes(value.toLowerCase()) ||
@@ -289,12 +292,26 @@ function CodeInput({ value, onChange, onCodeSelect, codes }: {
       )
     : codes;
 
+  function updateDropdownPos() {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left });
+    }
+  }
+
+  useEffect(() => {
+    function handleScroll() { setShowDropdown(false); }
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, []);
+
   return (
     <div style={{ position: 'relative' }}>
       <input
+        ref={inputRef}
         value={value}
-        onChange={e => { onChange(e.target.value); setShowDropdown(true); }}
-        onFocus={() => setShowDropdown(true)}
+        onChange={e => { onChange(e.target.value); updateDropdownPos(); setShowDropdown(true); }}
+        onFocus={() => { updateDropdownPos(); setShowDropdown(true); }}
         onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
         maxLength={20}
         placeholder="npr. NV01"
@@ -308,16 +325,16 @@ function CodeInput({ value, onChange, onCodeSelect, codes }: {
       />
       {showDropdown && filtered.length > 0 && (
         <div style={{
-          position: 'absolute',
-          top: '100%',
-          left: 0,
-          zIndex: 100,
+          position: 'fixed',
+          top: dropdownPos.top,
+          left: dropdownPos.left,
+          zIndex: 9999,
           background: 'white',
           border: '1px solid #a8d4b3',
           borderRadius: '8px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-          minWidth: '280px',
-          maxHeight: '200px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+          minWidth: '300px',
+          maxHeight: '240px',
           overflowY: 'auto',
         }}>
           {filtered.map(code => (
@@ -417,6 +434,9 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   const [editMode, setEditMode] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<InvoiceRecord | null>(null);
 
+  // leave confirmation
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+
   // ---- fetch ----
 
   const fetchInvoices = useCallback(async () => {
@@ -472,6 +492,17 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     if (month) setFilterMonth(parseInt(month));
     if (year) setFilterYear(parseInt(year));
   }, []);
+
+  // Escape key handler for manual form modal
+  useEffect(() => {
+    if (!showManualForm) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') handleAttemptClose();
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showManualForm, form.clientId, form.items]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -1128,6 +1159,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
         form.items.map((item, i) => ({
           invoice_id: newInv.id,
           sort_order: i,
+          code: item.code || null,
           description: item.description,
           line_type: item.line_type,
           quantity: item.quantity,
@@ -1285,6 +1317,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
         form.items.map((item, i) => ({
           invoice_id: newInv.id,
           sort_order: i,
+          code: item.code || null,
           description: item.description,
           line_type: item.line_type,
           quantity: item.quantity,
@@ -1319,6 +1352,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     if (formPdfUrl) URL.revokeObjectURL(formPdfUrl);
     setFormPdfUrl(null);
     setShowManualForm(false);
+    setShowLeaveConfirm(false);
     setForm(BLANK_FORM);
     setFormStep(1);
     setEditMode(false);
@@ -1327,6 +1361,18 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     setInvoiceNumReserved(false);
     setReservedInvoiceNum('');
     setReservedInvoiceSeq(0);
+  }
+
+  function isFormDirty(): boolean {
+    return form.clientId !== '' || form.items.some((item) => item.unit_price > 0);
+  }
+
+  function handleAttemptClose() {
+    if (isFormDirty()) {
+      setShowLeaveConfirm(true);
+    } else {
+      closeManualForm();
+    }
   }
 
   async function handleOpenEdit(invoice: InvoiceRecord) {
@@ -2039,7 +2085,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
 
       {/* ---- Manual Invoice Form modal ---- */}
       {showManualForm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={closeManualForm}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={handleAttemptClose}>
           <div
             className="bg-white rounded-10 shadow-2xl flex flex-col animate-slideIn w-full overflow-hidden"
             style={{ maxWidth: 860, maxHeight: '95vh' }}
@@ -2057,7 +2103,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                   ))}
                 </div>
               </div>
-              <button onClick={closeManualForm} className="p-1.5 rounded hover:bg-accent-soft text-text-muted">
+              <button onClick={handleAttemptClose} className="p-1.5 rounded hover:bg-accent-soft text-text-muted">
                 <X size={18} />
               </button>
             </div>
@@ -2599,6 +2645,30 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---- Leave confirmation dialog ---- */}
+      {showLeaveConfirm && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-10 shadow-2xl p-6 max-w-sm w-full animate-slideIn">
+            <h3 className="section-title mb-2">{t('inv.leave_confirm_title')}</h3>
+            <p className="text-sm text-text-muted mb-5">{t('inv.leave_confirm_body')}</p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowLeaveConfirm(false)}
+                className="btn-secondary text-sm"
+              >
+                {t('inv.leave_stay')}
+              </button>
+              <button
+                onClick={closeManualForm}
+                className="btn-danger text-sm"
+              >
+                {t('inv.leave_exit')}
+              </button>
             </div>
           </div>
         </div>

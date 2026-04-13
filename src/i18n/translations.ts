@@ -383,6 +383,10 @@ export const translations = {
       webhook_not_configured: 'URL webhook non configurato. Vai nelle Impostazioni.',
       auto_number: 'Automatico al salvataggio',
       preview_not_available_android: 'Anteprima non disponibile su Android. Scarica il PDF.',
+      leave_confirm_title: 'Abbandonare il modulo?',
+      leave_confirm_body: 'Le modifiche non salvate andranno perse.',
+      leave_stay: 'Rimani',
+      leave_exit: 'Esci',
     },
     pay: {
       title: 'Pagamenti',
@@ -818,6 +822,10 @@ export const translations = {
       webhook_not_configured: 'Webhook URL ni nastavljen. Pojdi v Nastavitve.',
       auto_number: 'Samodejno ob shranjevanju',
       preview_not_available_android: 'Predogled ni na voljo na Androidu. Prenesi PDF za ogled.',
+      leave_confirm_title: 'Zapustiti obrazec?',
+      leave_confirm_body: 'Vse neshranjene spremembe bodo izgubljene.',
+      leave_stay: 'Ostani',
+      leave_exit: 'Zapusti',
     },
     pay: {
       title: 'Plačila',
