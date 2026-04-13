@@ -128,6 +128,13 @@ export interface VehicleFile {
   };
 }
 
+export interface InvoiceCode {
+  code: string;
+  description_it: string;
+  description_sl: string | null;
+  description_en: string | null;
+}
+
 export type Language = 'it' | 'sl';
 
 export type InvoiceStatus = 'draft' | 'confirmed' | 'sent' | 'paid' | 'cancelled';

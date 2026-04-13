@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { InvoiceRecord, Settings } from '../types';
+import type { InvoiceRecord, Settings, InvoiceCode } from '../types';
 import { supabase } from './supabase';
 import {
   getSecondaryLanguage,
@@ -97,28 +97,19 @@ function getPaymentMethodSL(method: string): string {
 }
 
 // ─── REVERSE CHARGE DISCLAIMER TEXT ──────────────────────────────────────────
-function getReverseChargeText(secondaryLang: InvoiceLang | null): string[] {
-  const slText = 'DDV v skladu s 1. odstavkom 25. clena ZDDV-1 obracunan';
-  const rcText = 'Reverse Charge';
-
-  if (!secondaryLang) {
-    return [slText, rcText];
-  }
-  if (secondaryLang === 'IT') {
-    const itText = 'IVA ai sensi dell\'art. 25 comma 1 dello ZDDV-1 applicata';
-    return [slText, rcText, itText, rcText];
-  }
-  if (secondaryLang === 'EN') {
-    const enText = 'VAT pursuant to Art. 25 para. 1 of ZDDV-1 applied';
-    return [slText, rcText, enText, rcText];
-  }
-  return [slText, rcText];
+// Always Slovenian only — no secondary language for this legal text
+function getReverseChargeText(): string[] {
+  return [
+    'DDV v skladu s 1. odstavkom 25. clena ZDDV-1 obracunan',
+    'Reverse Charge',
+  ];
 }
 
 // ─── MAIN PDF GENERATOR ──────────────────────────────────────────────────────
 export async function generateInvoicePDF(
   invoice: InvoiceRecord,
-  settings: Settings
+  settings: Settings,
+  invoiceCodes?: InvoiceCode[]
 ): Promise<Blob> {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
@@ -272,6 +263,24 @@ export async function generateInvoicePDF(
   for (const item of items) {
     if (item.line_type === 'space') continue;
 
+    // Check if item has a matching code in invoice_codes — use pre-translated text directly
+    const codeRecord = item.code && invoiceCodes
+      ? invoiceCodes.find(c => c.code === item.code)
+      : null;
+
+    if (codeRecord) {
+      // Use pre-translated descriptions — no DeepL needed
+      slDescriptions[item.id] = sanitize(codeRecord.description_sl || codeRecord.description_it);
+      if (secondaryLang === 'IT' && codeRecord.description_it) {
+        const secText = sanitize(codeRecord.description_it);
+        if (secText !== slDescriptions[item.id]) secDescriptions[item.id] = secText;
+      } else if (secondaryLang === 'EN' && codeRecord.description_en) {
+        const secText = sanitize(codeRecord.description_en);
+        if (secText !== slDescriptions[item.id]) secDescriptions[item.id] = secText;
+      }
+      continue;
+    }
+
     // Step 1: get SL primary text
     const slText = inputLang === 'SL'
       ? item.description
@@ -340,7 +349,7 @@ export async function generateInvoicePDF(
 
   // Reverse charge disclaimer row
   if (invoice.is_reverse_charge) {
-    const rcLines = getReverseChargeText(secondaryLang);
+    const rcLines = getReverseChargeText();
     tableBody.push([
       { content: '' },
       { content: rcLines.join('\n'), styles: { fontSize: 7, fontStyle: 'italic' } },

@@ -5,9 +5,11 @@ export function getPrimaryLanguage(): InvoiceLang {
 }
 
 export function getSecondaryLanguage(countryCode: string | null): InvoiceLang | null {
-  if (!countryCode || countryCode.toUpperCase() === 'SI') return null; // SL only
-  if (countryCode.toUpperCase() === 'IT') return 'IT';
-  return 'EN';
+  if (!countryCode) return null;
+  const upper = countryCode.toUpperCase().trim();
+  if (upper === 'SI') return null;      // SL only
+  if (upper === 'IT') return 'IT';      // SL + IT
+  return 'EN';                          // SL + EN
 }
 
 // Static translations: SL is always the primary key, IT/EN are secondary values
@@ -29,17 +31,21 @@ const STATIC_TRANSLATIONS: Record<string, { IT: string; EN: string }> = {
   'SKUPAJ':       { IT: 'TOTALE',  EN: 'TOTAL' },
 
   // Payment labels
-  'PLACILO':      { IT: 'PAGAMENTO',        EN: 'PAYMENT' },
-  'ROK PLACILA':  { IT: 'SCADENZA',         EN: 'DUE DATE' },
+  'PLACILO':        { IT: 'PAGAMENTO',        EN: 'PAYMENT' },
+  'ROK PLACILA':    { IT: 'SCADENZA',         EN: 'DUE DATE' },
+  'BANCNO NAKAZILO': { IT: 'BONIFICO BANCARIO', EN: 'BANK TRANSFER' },
+  'GOTOVINA':       { IT: 'CONTANTI',          EN: 'CASH' },
+  'KREDITNA KARTICA': { IT: 'CARTA DI CREDITO', EN: 'CREDIT CARD' },
 
   // Invoice content — SL primary, IT secondary
-  'DOLGOROCNI NAJEM':    { IT: 'NOLEGGIO LUNGO TERMINE',    EN: 'LONG TERM RENTAL' },
-  'REGISTRSKA ST.':      { IT: 'TARGA',                     EN: 'PLATE NO.' },
-  'Registrska st.':      { IT: 'Targa',                     EN: 'Plate no.' },
-  'POGODBENI POLOG':     { IT: 'ANTICIPO CONTRATTUALE',     EN: 'CONTRACT DEPOSIT' },
-  'OBRACUN KAZNI':       { IT: 'ADDEBITO CONTRAVVENZIONI',  EN: 'PENALTIES CHARGE' },
-  'OBRACUN ZAVAROVANJA': { IT: 'ADDEBITO ASSICURAZIONE',   EN: 'INSURANCE CHARGE' },
-  'POVRACILO SKODE':     { IT: 'RISARCIMENTO DANNI',        EN: 'DAMAGE COMPENSATION' },
+  'DOLGOROCNI NAJEM':    { IT: 'NOLEGGIO LUNGO TERMINE',       EN: 'LONG TERM RENTAL' },
+  'REGISTRSKA ST.':      { IT: 'TARGA',                         EN: 'PLATE NO.' },
+  'Registrska st.':      { IT: 'Targa',                         EN: 'Plate no.' },
+  'REGISTRSKA':          { IT: 'TARGA',                         EN: 'PLATE' },
+  'POGODBENI POLOG':     { IT: 'ANTICIPO CONTRATTUALE',         EN: 'CONTRACT DEPOSIT' },
+  'OBRACUN KAZNI':       { IT: 'ADDEBITO CONTRAVVENZIONI',      EN: 'PENALTIES CHARGE' },
+  'OBRACUN ZAVAROVANJA': { IT: 'ADDEBITO ASSICURAZIONE',        EN: 'INSURANCE CHARGE' },
+  'POVRACILO SKODE':     { IT: 'RISARCIMENTO DANNI',            EN: 'DAMAGE COMPENSATION' },
   'Sklicevanje na pogodbo z dne': { IT: 'Riferimento contratto del', EN: 'Contract reference dated' },
   'Opravljene storitve po pogodbi z dne': {
     IT: 'Opravljiene storitve po pogodbi z dne',
@@ -233,14 +239,83 @@ export function normalizeSLtoIT(text: string): string {
   if (!text) return text;
   let result = text;
 
+  // Month names SL → IT (both upper and title case)
   const SL_TO_IT_MONTHS: Record<string, string> = {
     'JANUAR': 'GENNAIO', 'FEBRUAR': 'FEBBRAIO', 'MAREC': 'MARZO',
     'APRIL': 'APRILE', 'MAJ': 'MAGGIO', 'JUNIJ': 'GIUGNO',
     'JULIJ': 'LUGLIO', 'AVGUST': 'AGOSTO', 'SEPTEMBER': 'SETTEMBRE',
     'OKTOBER': 'OTTOBRE', 'NOVEMBER': 'NOVEMBRE', 'DECEMBER': 'DICEMBRE',
+    'Januar': 'Gennaio', 'Februar': 'Febbraio', 'Marec': 'Marzo',
+    'April': 'Aprile', 'Maj': 'Maggio', 'Junij': 'Giugno',
+    'Julij': 'Luglio', 'Avgust': 'Agosto', 'September': 'Settembre',
+    'Oktober': 'Ottobre', 'November': 'Novembre', 'December': 'Dicembre',
   };
 
-  // "MESECNINA ZA APRIL 2026" → "CANONE MESE DI APRILE 2026"
+  for (const [sl, it] of Object.entries(SL_TO_IT_MONTHS)) {
+    result = result.replace(new RegExp(`\\b${sl}\\b`, 'g'), it);
+  }
+
+  // Core invoice terms SL → IT (longest match first to avoid partial replacements)
+  const SL_TO_IT: Record<string, string> = {
+    'DOLGOROCNI NAJEM OSEBNEGA VOZILA':                          'NOLEGGIO A LUNGO TERMINE AUTOVETTURA',
+    'DOLGOROCNI NAJEM TOVORNEGA VOZILA':                         'NOLEGGIO A LUNGO TERMINE AUTOCARRO',
+    'DOLGOROCNI NAJEM':                                          'NOLEGGIO LUNGO TERMINE',
+    'MESECNINA ZA':                                              'CANONE MESE DI',
+    'MESECNA NAJEMNINA':                                         'CANONE MENSILE',
+    'POGODBENI POLOG':                                           'ANTICIPO CONTRATTUALE',
+    'POVRACILO SKODE':                                           'RISARCIMENTO DANNI',
+    'OBRACUN KAZNI':                                             'ADDEBITO CONTRAVVENZIONI',
+    'OBRACUN ZAVAROVANJA':                                       'ADDEBITO ASSICURAZIONE',
+    'REGISTRSKA ST.':                                            'TARGA',
+    'REGISTRSKA':                                                'TARGA',
+    'Sklicevanje na pogodbo z dne':                              'Riferimento contratto del',
+    'Opravljene storitve po pogodbi z dne':                      'Opravljiene storitve po pogodbi z dne',
+    'BANCNO NAKAZILO':                                           'BONIFICO BANCARIO',
+    'GOTOVINA':                                                  'CONTANTI',
+    'KREDITNA KARTICA':                                          'CARTA DI CREDITO',
+    'STROSEK PRANJA OSEBNEGA VOZILA':                            'ADDEBITO SPESE DI LAVAGGIO AUTOVETTURA',
+    'STROSEK PRANJA TOVORNEGA VOZILA':                           'ADDEBITO SPESE DI LAVAGGIO AUTOCARRO',
+    'STROSEK TOCENJA GORIVA':                                    'ADDEBITO SPESE DI RIFORNIMENTO CARBURANTE',
+    'OBRACUN ZAVAROVALNIСКЕ POLICE':                             'ADDEBITO POLIZZA ASSICURATIVA',
+    'STROSEK LETNE REGISTRACIJE':                                'ADDEBITO SPESE DI REGISTRAZIONE ANNUALE',
+    'STROSEK PRVE REGISTRACIJE':                                 'ADDEBITO SPESE DI IMMATRICOLAZIONE',
+    'STROSEK ODJAVE VOZILA':                                     'ADDEBITO SPESE DI RADIAZIONE',
+    'STROSEK UVOZA':                                             'ADDEBITO SPESE DI IMPORTAZIONE',
+    'STROSEK IZTERJAVE PO ROKU - RAZRED 1':                      'ADDEBITO SPESE DI INCASSO OLTRE TERMINE - FASCIA 1',
+    'STROSEK IZTERJAVE PO ROKU - RAZRED 2':                      'ADDEBITO SPESE DI INCASSO OLTRE TERMINE - FASCIA 2',
+    'STROSEK IZTERJAVE PO ROKU - RAZRED 3':                      'ADDEBITO SPESE DI INCASSO OLTRE TERMINE - FASCIA 3',
+    'STROSEK IZTERJAVE PO ROKU - RAZRED 4':                      'ADDEBITO SPESE DI INCASSO OLTRE TERMINE - FASCIA 4',
+    'STROSEK IZVENPOGODBENIH STORITEV - TEKOCINA ZA STEKLA':     'ADDEBITO SPESE PER SERVIZI EXTRA CONTRATTO - LIQUIDO LAVAVETRI',
+    'STROSEK IZVENPOGODBENIH STORITEV - ADBLUE':                 'ADDEBITO SPESE PER SERVIZI EXTRA CONTRATTO - ADBLUE',
+    'STROSEK IZVENPOGODBENIH STORITEV - SPLOSNO':                'ADDEBITO SPESE PER SERVIZI EXTRA CONTRATTO - GENERICO',
+    'STROSEK IZVENPOGODBENIH STORITEV - NADOMESTNO VOZILO':      'ADDEBITO SPESE PER SERVIZI EXTRA CONTRATTO - VETTURA DI CORTESIA',
+    'STROSEK IZVENPOGODBENIH STORITEV - VZDRZEVANJE':            'ADDEBITO SPESE PER SERVIZI EXTRA CONTRATTO - MANUTENZIONE',
+    'STROSEK IZVENPOGODBENIH STORITEV - KAROSERIJA':             'ADDEBITO SPESE PER SERVIZI EXTRA CONTRATTO - CARROZZERIA',
+    'STROSEK IZVENPOGODBENIH STORITEV - PNEVMATIKE':             'ADDEBITO SPESE PER SERVIZI EXTRA CONTRATTO - PNEUMATICI',
+    'STROSEK IZVENPOGODBENIH STORITEV - STEKLA':                 'ADDEBITO SPESE PER SERVIZI EXTRA CONTRATTO - CRISTALLI',
+    'STROSEK PREVOZA - PREMESTITVE - DOSTAVE - PREVZEMA':        'ADDEBITO SPESE DI TRASPORTO - TRASFERIMENTO - CONSEGNA - RITIRO',
+    'STORITEV ISKANJA IN UPRAVLJANJA DOBAVITELJEV':              'SERVIZIO DI RICERCA E GESTIONE FORNITORI',
+    'STORITEV RAZVOJA MARKETINGA IN PROMOCIJE':                  'SERVIZIO DI RICERCA SVILUPPO MARKETING PROMOZIONE',
+    'STROSEK OBNOVE OPREME - KOMPLET PRVE POMOCI':               'ADDEBITO RIPRISTINO DOTAZIONI - CASSETTA PS',
+    'STROSEK OBNOVE OPREME - GASILNIK':                          'ADDEBITO RIPRISTINO DOTAZIONI - ESTINTORE',
+    'STROSEK OBNOVE OPREME - KIT ZARNIC H1 H4 H7':              'ADDEBITO RIPRISTINO DOTAZIONI - KIT LAMPADE H1 H4 H7',
+    'STROSEK OBNOVE OPREME - ODSEVNI JOPIC':                     'ADDEBITO RIPRISTINO DOTAZIONI - GILET AV',
+    'STROSEK OBNOVE OPREME - VARNOSTNI TRIKOTNIK':               'ADDEBITO RIPRISTINO DOTAZIONI - TRIANGOLO',
+    'STROSEK OBNOVE OPREME - SPLOSNO':                           'ADDEBITO RIPRISTINO DOTAZIONI - GENERICO',
+    'STROSEK IZVENPOGODBENIH STORITEV':                          'ADDEBITO SPESE PER SERVIZI EXTRA CONTRATTO',
+    'POVRACILO SKODE CL. 4':                                     'RISARCIMENTO DANNI ART. 4',
+    'POVRACILO SKODE CL. 8':                                     'RISARCIMENTO DANNI ART. 8',
+    'OBRACUN KAZNI CL. 12':                                      'ADDEBITO PENALE ART. 12',
+    'STROSEK PONOVNEGA OBVESTILA O PREKRSKU':                    'ADDEBITO SPESE DI RINOTIFICA CONTRAVVENZIONE',
+  };
+
+  // Apply longest match first to avoid partial replacements
+  const sortedKeys = Object.keys(SL_TO_IT).sort((a, b) => b.length - a.length);
+  for (const sl of sortedKeys) {
+    result = result.replace(new RegExp(sl, 'gi'), SL_TO_IT[sl]);
+  }
+
+  // Handle MESECNINA ZA + month pattern (catches any remaining after dict pass)
   result = result.replace(
     /MESECNINA ZA ([A-Z]+) (\d{4})/gi,
     (_match, month, year) => {
@@ -248,10 +323,6 @@ export function normalizeSLtoIT(text: string): string {
       return `CANONE MESE DI ${itMonth} ${year}`;
     }
   );
-
-  result = result.replace(/REGISTRSKA ST\./gi, 'TARGA');
-  result = result.replace(/DOLGOROCNI NAJEM/gi, 'NOLEGGIO LUNGO TERMINE');
-  result = result.replace(/BANCNO NAKAZILO/gi, 'BONIFICO BANCARIO');
 
   return result;
 }
@@ -285,26 +356,51 @@ export async function translateSLtoSecondary(
   if (!slText || secondaryLang === 'SL') return slText;
   if (shouldSkipTranslation(slText)) return slText;
 
-  // Static dict lookup first (always runs)
-  const staticResult = getSecondaryTranslation(slText, secondaryLang);
-  if (staticResult) return staticResult;
+  if (secondaryLang === 'IT') {
+    // Static dict lookup first
+    const staticResult = getSecondaryTranslation(slText, 'IT');
+    if (staticResult) return staticResult;
 
-  // DeepL fallback — SL → IT or SL → EN
-  if (!deeplWebhookUrl) return slText;
-  try {
-    const response = await fetch(deeplWebhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: slText,
-        source_lang: 'SL',
-        target_lang: secondaryLang === 'IT' ? 'IT' : 'EN-GB',
-      }),
-    });
-    if (!response.ok) return slText;
-    const data = await response.json();
-    return data.translation || slText;
-  } catch {
+    // Try normalizeSLtoIT before calling DeepL
+    const normalized = normalizeSLtoIT(slText);
+    if (normalized !== slText) return normalized;
+
+    // Fall back to DeepL only if no static match
+    if (deeplWebhookUrl) {
+      try {
+        const response = await fetch(deeplWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: slText, target_lang: 'IT' }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          return data.translation || slText;
+        }
+      } catch { return slText; }
+    }
     return slText;
   }
+
+  if (secondaryLang === 'EN') {
+    const staticResult = getSecondaryTranslation(slText, 'EN');
+    if (staticResult) return staticResult;
+
+    if (deeplWebhookUrl) {
+      try {
+        const response = await fetch(deeplWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: slText, target_lang: 'EN-GB' }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          return data.translation || slText;
+        }
+      } catch { return slText; }
+    }
+    return slText;
+  }
+
+  return slText;
 }

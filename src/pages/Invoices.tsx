@@ -19,7 +19,7 @@ import {
 import { generateInvoicePDF } from '../lib/pdfGenerator';
 import type {
   Language, InvoiceRecord, InvoiceStatus, InvoiceType,
-  InvoiceItem, Client, Vehicle, Settings, Payment,
+  InvoiceItem, Client, Vehicle, Settings, Payment, InvoiceCode,
 } from '../types';
 
 interface InvoicesProps {
@@ -135,6 +135,10 @@ const MONTHS = [
 
 function newItemId() {
   return `item_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function isMobileAndroid(): boolean {
+  return /Android/i.test(navigator.userAgent);
 }
 
 // ---- MarkAsPaidModal ----
@@ -269,6 +273,80 @@ function MarkAsPaidModal({
   );
 }
 
+// ---- CodeInput with autocomplete from invoice_codes ----
+
+function CodeInput({ value, onChange, onCodeSelect, codes }: {
+  value: string;
+  onChange: (val: string) => void;
+  onCodeSelect: (code: InvoiceCode) => void;
+  codes: InvoiceCode[];
+}) {
+  const [showDropdown, setShowDropdown] = useState(false);
+  const filtered = value.length > 0
+    ? codes.filter(c =>
+        c.code.toLowerCase().includes(value.toLowerCase()) ||
+        c.description_it.toLowerCase().includes(value.toLowerCase())
+      )
+    : codes;
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        value={value}
+        onChange={e => { onChange(e.target.value); setShowDropdown(true); }}
+        onFocus={() => setShowDropdown(true)}
+        onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+        maxLength={20}
+        placeholder="npr. NV01"
+        style={{
+          width: '80px',
+          padding: '4px 8px',
+          border: '1px solid #a8d4b3',
+          borderRadius: '6px',
+          fontSize: '12px',
+        }}
+      />
+      {showDropdown && filtered.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          zIndex: 100,
+          background: 'white',
+          border: '1px solid #a8d4b3',
+          borderRadius: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+          minWidth: '280px',
+          maxHeight: '200px',
+          overflowY: 'auto',
+        }}>
+          {filtered.map(code => (
+            <div
+              key={code.code}
+              onMouseDown={() => { onCodeSelect(code); setShowDropdown(false); }}
+              style={{
+                padding: '8px 12px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                borderBottom: '1px solid #f0f0f0',
+              }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f0fdf4'}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'white'}
+            >
+              <span style={{ fontWeight: '700', color: '#1a4731', fontFamily: 'monospace' }}>
+                {code.code}
+              </span>
+              <span style={{ color: '#6b8f75', marginLeft: '8px' }}>
+                {code.description_it}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---- main component ----
 
 export default function Invoices({ t, language: _language }: InvoicesProps) {
@@ -326,7 +404,14 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   const [savingDraft, setSavingDraft] = useState(false);
   const [formPdfUrl, setFormPdfUrl] = useState<string | null>(null);
   const [formPdfLoading, setFormPdfLoading] = useState(false);
+  const [invoiceCodes, setInvoiceCodes] = useState<InvoiceCode[]>([]);
   const viesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // invoice number: peeked on open (no increment), reserved on save (increments counter)
+  const [peekedInvoiceNum, setPeekedInvoiceNum] = useState('');
+  const [invoiceNumReserved, setInvoiceNumReserved] = useState(false);
+  const [reservedInvoiceNum, setReservedInvoiceNum] = useState('');
+  const [reservedInvoiceSeq, setReservedInvoiceSeq] = useState(0);
 
   // edit mode
   const [editMode, setEditMode] = useState(false);
@@ -537,7 +622,8 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       // Always fetch fresh full invoice data so client/vehicle relations are complete
       const full = await fetchFullInvoice(invoice.id);
       const settings = await getSettings();
-      const blob = await generateInvoicePDF(full, settings);
+      const { data: codes } = await supabase.from('invoice_codes').select('*');
+      const blob = await generateInvoicePDF(full, settings, (codes as InvoiceCode[]) || undefined);
       const url = URL.createObjectURL(blob);
       setPdfBlobUrl(url);
       setPreviewIsBlob(true);
@@ -570,7 +656,8 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       // Always fetch fresh full invoice data so client/vehicle relations are complete
       const full = await fetchFullInvoice(invoice.id);
       const settings = await getSettings();
-      const blob = await generateInvoicePDF(full, settings);
+      const { data: codes } = await supabase.from('invoice_codes').select('*');
+      const blob = await generateInvoicePDF(full, settings, (codes as InvoiceCode[]) || undefined);
       const filename = `Fattura_${invoice.invoice_number.replace('/', '-')}.pdf`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -618,7 +705,8 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     const full = await fetchFullInvoice(invoiceId);
 
     // Generate & upload PDF
-    const pdfBlob = await generateInvoicePDF(full, settings);
+    const { data: codes } = await supabase.from('invoice_codes').select('*');
+    const pdfBlob = await generateInvoicePDF(full, settings, (codes as InvoiceCode[]) || undefined);
     const pdfPath = `invoices/${full.invoice_year}/${full.invoice_number.replace('/', '-')}.pdf`;
 
     const { error: uploadError } = await supabase.storage
@@ -767,15 +855,15 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   async function initManualForm() {
     try {
       const settings = await getSettings();
-      const { data: numRpcData, error: numRpcErr } = await supabase
-        .rpc('get_next_invoice_number', { p_year: new Date().getFullYear() });
-      if (numRpcErr) throw numRpcErr;
-      const invNum = numRpcData?.[0]?.invoice_number || '';
       const today = new Date().toISOString().split('T')[0];
       const dueDate = calculateDueDate(today, settings?.payment_due_days ?? 30);
+      setPeekedInvoiceNum('');
+      setInvoiceNumReserved(false);
+      setReservedInvoiceNum('');
+      setReservedInvoiceSeq(0);
       setForm({
         ...BLANK_FORM,
-        invoiceNumber: invNum,
+        invoiceNumber: '',
         invoiceDate: today,
         dueDate,
         contractRefIt: settings?.contract_ref_it || '',
@@ -785,9 +873,32 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       });
       setFormStep(1);
       setFormPdfUrl(null);
+      // Peek at next number (read-only, does NOT increment the sequence)
+      const { data: peekData } = await supabase
+        .rpc('peek_next_invoice_number', { p_year: new Date().getFullYear() });
+      if (peekData?.[0]) setPeekedInvoiceNum(peekData[0].invoice_number);
+      // Fetch invoice codes for autocomplete
+      const { data: codes } = await supabase
+        .from('invoice_codes')
+        .select('*')
+        .order('code', { ascending: true });
+      setInvoiceCodes((codes as InvoiceCode[]) || []);
     } catch {
       toast.error(t('error.fetch_failed'));
     }
+  }
+
+  async function getAndReserveInvoiceNumber(): Promise<{ number: string; sequence: number } | null> {
+    if (invoiceNumReserved) {
+      return { number: reservedInvoiceNum, sequence: reservedInvoiceSeq };
+    }
+    const { data, error } = await supabase
+      .rpc('get_next_invoice_number', { p_year: new Date().getFullYear() });
+    if (error || !data?.[0]) return null;
+    setReservedInvoiceNum(data[0].invoice_number);
+    setReservedInvoiceSeq(data[0].sequence_number);
+    setInvoiceNumReserved(true);
+    return { number: data[0].invoice_number, sequence: data[0].sequence_number };
   }
 
   function buildDefaultItems(
@@ -957,7 +1068,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
             }))
           : [],
       };
-      const blob = await generateInvoicePDF(fakeInvoice, settings);
+      const blob = await generateInvoicePDF(fakeInvoice, settings, invoiceCodes.length > 0 ? invoiceCodes : undefined);
       const url = URL.createObjectURL(blob);
       setFormPdfUrl(url);
     } catch {
@@ -971,15 +1082,15 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     setSavingDraft(true);
     try {
       const settings = await getFormSettings();
-      const { data: numData, error: numErr } = await supabase
-        .rpc('get_next_invoice_number', { p_year: new Date().getFullYear() });
-      if (numErr) throw numErr;
-      const invoiceNumber = numData?.[0]?.invoice_number;
-      const sequenceNumber = numData?.[0]?.sequence_number;
+      const numData = await getAndReserveInvoiceNumber();
+      if (!numData) {
+        toast.error(t('error.invoice_number_failed'));
+        return;
+      }
       const invoiceRecord = {
-        invoice_number: form.invoiceNumber || invoiceNumber,
+        invoice_number: numData.number,
         invoice_year: currentYear,
-        invoice_sequence: sequenceNumber || 0,
+        invoice_sequence: numData.sequence,
         invoice_type: form.invoiceType,
         client_id: form.clientId || null,
         vehicle_id: form.vehicleId || null,
@@ -1050,15 +1161,15 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     setSavingDraft(true);
     try {
       const settings = await getFormSettings();
-      const { data: numData, error: numErr } = await supabase
-        .rpc('get_next_invoice_number', { p_year: new Date().getFullYear() });
-      if (numErr) throw numErr;
-      const invoiceNumber = numData?.[0]?.invoice_number;
-      const sequenceNumber = numData?.[0]?.sequence_number;
+      const numData = await getAndReserveInvoiceNumber();
+      if (!numData) {
+        toast.error(t('error.invoice_number_failed'));
+        return;
+      }
       const invoiceRecord = {
-        invoice_number: form.invoiceNumber || invoiceNumber,
+        invoice_number: numData.number,
         invoice_year: currentYear,
-        invoice_sequence: sequenceNumber || 0,
+        invoice_sequence: numData.sequence,
         invoice_type: form.invoiceType,
         client_id: form.clientId || null,
         vehicle_id: form.vehicleId || null,
@@ -1129,15 +1240,15 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     setSavingDraft(true);
     try {
       const settings = await getFormSettings();
-      const { data: numData, error: numErr } = await supabase
-        .rpc('get_next_invoice_number', { p_year: new Date().getFullYear() });
-      if (numErr) throw numErr;
-      const invoiceNumber = numData?.[0]?.invoice_number;
-      const sequenceNumber = numData?.[0]?.sequence_number;
+      const numData = await getAndReserveInvoiceNumber();
+      if (!numData) {
+        toast.error(t('error.invoice_number_failed'));
+        return;
+      }
       const invoiceRecord = {
-        invoice_number: form.invoiceNumber || invoiceNumber,
+        invoice_number: numData.number,
         invoice_year: currentYear,
-        invoice_sequence: sequenceNumber || 0,
+        invoice_sequence: numData.sequence,
         invoice_type: form.invoiceType,
         client_id: form.clientId || null,
         vehicle_id: form.vehicleId || null,
@@ -1212,6 +1323,10 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     setFormStep(1);
     setEditMode(false);
     setEditingInvoice(null);
+    setPeekedInvoiceNum('');
+    setInvoiceNumReserved(false);
+    setReservedInvoiceNum('');
+    setReservedInvoiceSeq(0);
   }
 
   async function handleOpenEdit(invoice: InvoiceRecord) {
@@ -1254,6 +1369,12 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       setFormStep(2);
       setFormPdfUrl(null);
       setShowManualForm(true);
+      // Fetch invoice codes for autocomplete
+      const { data: codes } = await supabase
+        .from('invoice_codes')
+        .select('*')
+        .order('code', { ascending: true });
+      setInvoiceCodes((codes as InvoiceCode[]) || []);
     } catch {
       toast.error(t('error.fetch_failed'));
     }
@@ -1335,7 +1456,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
             }))
           : [],
       };
-      const pdfBlob = await generateInvoicePDF(fullInvoiceForPdf, settings);
+      const pdfBlob = await generateInvoicePDF(fullInvoiceForPdf, settings, invoiceCodes.length > 0 ? invoiceCodes : undefined);
       const pdfPath = `invoices/${editingInvoice.invoice_year}/${editingInvoice.invoice_number.replace('/', '-')}.pdf`;
       await supabase.storage.from('invoice-pdfs').upload(pdfPath, pdfBlob, { contentType: 'application/pdf', upsert: true });
       await supabase.from('invoices').update({ pdf_path: pdfPath }).eq('id', editingInvoice.id);
@@ -1814,7 +1935,40 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                   <span className="spinner" />
                 </div>
               ) : pdfBlobUrl ? (
-                <iframe src={pdfBlobUrl} className="w-full h-full" title="Invoice Preview" />
+                isMobileAndroid() ? (
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '300px',
+                    gap: '16px',
+                    background: '#f8faf8',
+                    borderRadius: '8px',
+                    border: '1px solid #d4ead9',
+                  }}>
+                    <FileText size={48} strokeWidth={1.5} color="#1a4731" />
+                    <p style={{ color: '#6b8f75', textAlign: 'center', margin: 0 }}>
+                      {t('inv.preview_not_available_android')}
+                    </p>
+                    <button onClick={() => handleDownload(previewInvoice!)} style={{
+                      background: '#1a4731',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '10px 24px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}>
+                      <Download size={16} strokeWidth={1.5} />
+                      {t('inv.download')}
+                    </button>
+                  </div>
+                ) : (
+                  <iframe src={pdfBlobUrl} className="w-full h-full" title="Invoice Preview" />
+                )
               ) : (
                 <div className="h-full flex items-center justify-center text-text-muted text-sm">
                   {t('error.pdf_failed')}
@@ -1916,8 +2070,37 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                   {/* Left column */}
                   <div className="space-y-4">
                     <div>
-                      <label className="label">{t('inv.number')}</label>
-                      <input value={form.invoiceNumber} readOnly className="input-field bg-gray-50 cursor-not-allowed" />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                        <label className="label" style={{ margin: 0 }}>{t('inv.number')}</label>
+                        {!editMode && (
+                          <span
+                            title="Številka bo potrjena ob shranjevanju / Il numero sarà confermato al salvataggio"
+                            style={{ cursor: 'help', color: '#6b8f75', lineHeight: 1, display: 'flex' }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+                            </svg>
+                          </span>
+                        )}
+                      </div>
+                      {editMode ? (
+                        <input value={form.invoiceNumber} readOnly className="input-field bg-gray-50 cursor-not-allowed" />
+                      ) : (
+                        <div style={{
+                          padding: '8px 14px',
+                          border: '1px solid #a8d4b3',
+                          borderRadius: '8px',
+                          background: '#f0fdf4',
+                          fontFamily: 'monospace',
+                          color: '#1a4731',
+                          fontWeight: '700',
+                          minHeight: '36px',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}>
+                          {invoiceNumReserved ? reservedInvoiceNum : (peekedInvoiceNum || '…')}
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="label">{t('inv.date')}</label>
@@ -2107,21 +2290,19 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                           <tr key={item.id} className="border-b border-gray-50">
                             <td className="py-1.5 pr-2 text-text-muted text-xs">{idx + 1}</td>
                             <td className="py-1.5 pr-2">
-                              {/* TODO: Connect code field to Supabase `invoice_codes` table
-                                  Table structure needed: invoice_codes (code TEXT PK, description_sl TEXT, description_it TEXT)
-                                  When user types a code, lookup description and auto-fill the description field
-                                  Tim will create this table together with developer */}
-                              <input
-                                type="text"
+                              <CodeInput
                                 value={item.code || ''}
-                                maxLength={20}
-                                placeholder="npr. M001"
-                                onChange={(e) => setForm((f) => ({
+                                codes={invoiceCodes}
+                                onChange={(val) => setForm((f) => ({
                                   ...f,
-                                  items: f.items.map((i) => i.id === item.id ? { ...i, code: e.target.value } : i),
+                                  items: f.items.map((i) => i.id === item.id ? { ...i, code: val } : i),
                                 }))}
-                                className="input-field py-1 text-xs w-full"
-                                style={{ maxWidth: 80 }}
+                                onCodeSelect={(selected) => setForm((f) => ({
+                                  ...f,
+                                  items: f.items.map((i) => i.id === item.id
+                                    ? { ...i, code: selected.code, description: selected.description_it }
+                                    : i),
+                                }))}
                               />
                             </td>
                             <td className="py-1.5 pr-2">
@@ -2334,7 +2515,26 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                       <span className="spinner" />
                     </div>
                   ) : formPdfUrl ? (
-                    <iframe src={formPdfUrl} className="w-full" style={{ height: '60vh' }} title="Preview" />
+                    isMobileAndroid() ? (
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        height: '300px',
+                        gap: '16px',
+                        background: '#f8faf8',
+                        borderRadius: '8px',
+                        border: '1px solid #d4ead9',
+                      }}>
+                        <FileText size={48} strokeWidth={1.5} color="#1a4731" />
+                        <p style={{ color: '#6b8f75', textAlign: 'center', margin: 0 }}>
+                          {t('inv.preview_not_available_android')}
+                        </p>
+                      </div>
+                    ) : (
+                      <iframe src={formPdfUrl} className="w-full" style={{ height: '60vh' }} title="Preview" />
+                    )
                   ) : (
                     <div className="flex items-center justify-center h-96 text-text-muted text-sm">
                       {t('error.pdf_failed')}

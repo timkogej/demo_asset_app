@@ -304,6 +304,7 @@ export const translations = {
       pdf_failed: 'Errore nella generazione del PDF',
       webhook_failed: 'Errore nella notifica webhook',
       generic: 'Si è verificato un errore',
+      invoice_number_failed: 'Errore nel recupero del numero fattura',
     },
     common: {
       loading: 'Caricamento...',
@@ -380,6 +381,8 @@ export const translations = {
       go_to_invoices: 'Vai alle fatture →',
       draft_status_note: 'Le fatture sono in stato "Bozza"',
       webhook_not_configured: 'URL webhook non configurato. Vai nelle Impostazioni.',
+      auto_number: 'Automatico al salvataggio',
+      preview_not_available_android: 'Anteprima non disponibile su Android. Scarica il PDF.',
     },
     pay: {
       title: 'Pagamenti',
@@ -736,6 +739,7 @@ export const translations = {
       pdf_failed: 'Napaka pri ustvarjanju PDF',
       webhook_failed: 'Napaka pri webhook obvestilu',
       generic: 'Prišlo je do napake',
+      invoice_number_failed: 'Napaka pri pridobivanju številke računa',
     },
     common: {
       loading: 'Nalaganje...',
@@ -812,6 +816,8 @@ export const translations = {
       go_to_invoices: 'Pojdi na račune →',
       draft_status_note: 'Računi so v statusu "Osnutek"',
       webhook_not_configured: 'Webhook URL ni nastavljen. Pojdi v Nastavitve.',
+      auto_number: 'Samodejno ob shranjevanju',
+      preview_not_available_android: 'Predogled ni na voljo na Androidu. Prenesi PDF za ogled.',
     },
     pay: {
       title: 'Plačila',
