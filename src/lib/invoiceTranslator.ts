@@ -315,12 +315,21 @@ export function normalizeSLtoIT(text: string): string {
     result = result.replace(new RegExp(sl, 'gi'), SL_TO_IT[sl]);
   }
 
-  // Handle MESECNINA ZA + month pattern (catches any remaining after dict pass)
+  // Handle MESECNINA ZA + month + year
   result = result.replace(
     /MESECNINA ZA ([A-Z]+) (\d{4})/gi,
     (_match, month, year) => {
       const itMonth = SL_TO_IT_MONTHS[month.toUpperCase()] || month;
       return `CANONE MESE DI ${itMonth} ${year}`;
+    }
+  );
+
+  // Handle MESECNINA ZA + month (no year)
+  result = result.replace(
+    /MESECNINA ZA ([A-Z]+)$/gi,
+    (_match, month) => {
+      const itMonth = SL_TO_IT_MONTHS[month.toUpperCase()] || month;
+      return `CANONE MESE DI ${itMonth}`;
     }
   );
 
@@ -347,57 +356,74 @@ export async function translateWithDatePreservation(
   return translateSLtoSecondary(text, targetLang, deeplWebhookUrl);
 }
 
+// Translate text via DeepL webhook — supports SL, EN, IT targets
+export async function translateWithDeepL(
+  text: string,
+  targetLang: 'SL' | 'EN' | 'IT',
+  deeplWebhookUrl: string
+): Promise<string> {
+  if (!text || !deeplWebhookUrl) return text;
+  if (shouldSkipTranslation(text)) return text;
+
+  try {
+    const deeplTargetLang =
+      targetLang === 'SL' ? 'SL' :
+      targetLang === 'IT' ? 'IT' :
+      'EN-GB';
+
+    const response = await fetch(deeplWebhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: text,
+        source_lang: targetLang === 'SL' ? 'IT' : 'SL',
+        target_lang: deeplTargetLang,
+      }),
+    });
+    if (!response.ok) return text;
+    const data = await response.json();
+    return data.translation || text;
+  } catch {
+    return text;
+  }
+}
+
 // Get secondary translation (SL → IT or SL → EN) via static dict, then DeepL fallback
 export async function translateSLtoSecondary(
   slText: string,
   secondaryLang: InvoiceLang,
   deeplWebhookUrl: string
 ): Promise<string> {
-  if (!slText || secondaryLang === 'SL') return slText;
+  if (!slText) return slText;
+  if (secondaryLang === 'SL') return slText;
   if (shouldSkipTranslation(slText)) return slText;
 
   if (secondaryLang === 'IT') {
-    // Static dict lookup first
-    const staticResult = getSecondaryTranslation(slText, 'IT');
-    if (staticResult) return staticResult;
-
-    // Try normalizeSLtoIT before calling DeepL
+    // 1. Try static normalization first
     const normalized = normalizeSLtoIT(slText);
     if (normalized !== slText) return normalized;
 
-    // Fall back to DeepL only if no static match
+    // 2. Try static translations dict
+    const static_ = getSecondaryTranslation(slText, 'IT');
+    if (static_ && static_ !== slText) return static_;
+
+    // 3. DeepL SL → IT
     if (deeplWebhookUrl) {
-      try {
-        const response = await fetch(deeplWebhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: slText, target_lang: 'IT' }),
-        });
-        if (response.ok) {
-          const data = await response.json();
-          return data.translation || slText;
-        }
-      } catch { return slText; }
+      const result = await translateWithDeepL(slText, 'IT', deeplWebhookUrl);
+      if (result && result !== slText) return result;
     }
+
+    // 4. NEVER fall back to English — return original SL text
     return slText;
   }
 
   if (secondaryLang === 'EN') {
-    const staticResult = getSecondaryTranslation(slText, 'EN');
-    if (staticResult) return staticResult;
+    const static_ = getSecondaryTranslation(slText, 'EN');
+    if (static_ && static_ !== slText) return static_;
 
     if (deeplWebhookUrl) {
-      try {
-        const response = await fetch(deeplWebhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: slText, target_lang: 'EN-GB' }),
-        });
-        if (response.ok) {
-          const data = await response.json();
-          return data.translation || slText;
-        }
-      } catch { return slText; }
+      const result = await translateWithDeepL(slText, 'EN', deeplWebhookUrl);
+      if (result && result !== slText) return result;
     }
     return slText;
   }

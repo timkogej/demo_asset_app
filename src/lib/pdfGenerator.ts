@@ -6,9 +6,10 @@ import {
   getSecondaryLanguage,
   biLabel,
   getBilingualPeriod,
-  translateITtoSL,
-  translateWithDatePreservation,
+  normalizeITtoSL,
   normalizeSLtoIT,
+  getSecondaryTranslation,
+  translateWithDeepL,
   type InvoiceLang,
 } from './invoiceTranslator';
 
@@ -117,10 +118,88 @@ export async function generateInvoicePDF(
   const secondaryLang: InvoiceLang | null = getSecondaryLanguage(invoice.client?.country || null);
 
   // Helper: bilingual label (SL primary, secondary after "/" — or just SL if no secondary)
-  const bi = (slText: string): string => sanitize(biLabel(slText, secondaryLang));
+  const bi = (slText: string): string => {
+    if (!secondaryLang) return sanitize(slText);
+    const combined = biLabel(slText, secondaryLang);
+    if (combined !== slText) return sanitize(combined);
+    if (secondaryLang === 'IT') {
+      const normalized = normalizeSLtoIT(slText);
+      if (normalized !== slText) return sanitize(`${slText} / ${normalized}`);
+    }
+    return sanitize(slText);
+  };
 
   // input_language tells us what language the item descriptions are stored in
-  const inputLang = (invoice as InvoiceRecord & { input_language?: string }).input_language || 'IT';
+  const inputLang = ((invoice as InvoiceRecord & { input_language?: string }).input_language || 'IT') as 'IT' | 'SL';
+
+  // biDesc: translate item description to { primary (SL), secondary (IT/EN/null) }
+  const biDesc = async (
+    description: string,
+    itemCode?: string | null,
+    lang: 'IT' | 'SL' = 'IT'
+  ): Promise<{ primary: string; secondary: string | null }> => {
+    if (!description) return { primary: '', secondary: null };
+
+    if (itemCode && invoiceCodes) {
+      const codeRecord = invoiceCodes.find(c => c.code === itemCode);
+      if (codeRecord) {
+        const primary = sanitize(codeRecord.description_sl || codeRecord.description_it);
+        let secondary: string | null = null;
+        if (secondaryLang === 'IT') secondary = sanitize(codeRecord.description_it);
+        else if (secondaryLang === 'EN') secondary = sanitize(codeRecord.description_en || codeRecord.description_it);
+        return { primary, secondary: secondary !== primary ? secondary : null };
+      }
+    }
+
+    let slText: string;
+    let originalIT: string | null = null;
+
+    if (lang === 'IT') {
+      originalIT = description;
+      slText = normalizeITtoSL(description);
+      if (slText === description && settings.deepl_webhook_url) {
+        const deepLSL = await translateWithDeepL(description, 'SL', settings.deepl_webhook_url);
+        if (deepLSL && deepLSL !== description) slText = deepLSL;
+      }
+    } else {
+      slText = description;
+    }
+
+    if (!secondaryLang) {
+      return { primary: sanitize(slText), secondary: null };
+    }
+
+    let secText: string | null = null;
+
+    if (secondaryLang === 'IT') {
+      if (originalIT && originalIT !== slText) {
+        secText = originalIT;
+      } else {
+        const normalized = normalizeSLtoIT(slText);
+        if (normalized !== slText) {
+          secText = normalized;
+        } else if (settings.deepl_webhook_url) {
+          const deepLIT = await translateWithDeepL(slText, 'IT', settings.deepl_webhook_url);
+          if (deepLIT && deepLIT !== slText) secText = deepLIT;
+        }
+      }
+      // NEVER leave Italian clients without Italian secondary
+      if (!secText) secText = originalIT || description;
+    } else if (secondaryLang === 'EN') {
+      const static_ = getSecondaryTranslation(slText, 'EN');
+      if (static_) {
+        secText = static_;
+      } else if (settings.deepl_webhook_url) {
+        const deepLEN = await translateWithDeepL(slText, 'EN', settings.deepl_webhook_url);
+        if (deepLEN && deepLEN !== slText) secText = deepLEN;
+      }
+    }
+
+    return {
+      primary: sanitize(slText),
+      secondary: secText && sanitize(secText) !== sanitize(slText) ? sanitize(secText) : null,
+    };
+  };
 
   const marginL = 15;
   const marginR = 195;
@@ -256,58 +335,7 @@ export async function generateInvoicePDF(
   // ─── ITEMS TABLE ─────────────────────────────────────────────────────────
   const items = invoice.items || [];
 
-  // Translate descriptions: IT input → SL primary, then SL → secondary
-  const slDescriptions: Record<string, string> = {};
-  const secDescriptions: Record<string, string> = {};
-
-  for (const item of items) {
-    if (item.line_type === 'space') continue;
-
-    // Check if item has a matching code in invoice_codes — use pre-translated text directly
-    const codeRecord = item.code && invoiceCodes
-      ? invoiceCodes.find(c => c.code === item.code)
-      : null;
-
-    if (codeRecord) {
-      // Use pre-translated descriptions — no DeepL needed
-      slDescriptions[item.id] = sanitize(codeRecord.description_sl || codeRecord.description_it);
-      if (secondaryLang === 'IT' && codeRecord.description_it) {
-        const secText = sanitize(codeRecord.description_it);
-        if (secText !== slDescriptions[item.id]) secDescriptions[item.id] = secText;
-      } else if (secondaryLang === 'EN' && codeRecord.description_en) {
-        const secText = sanitize(codeRecord.description_en);
-        if (secText !== slDescriptions[item.id]) secDescriptions[item.id] = secText;
-      }
-      continue;
-    }
-
-    // Step 1: get SL primary text
-    const slText = inputLang === 'SL'
-      ? item.description
-      : await translateITtoSL(item.description, settings.deepl_webhook_url || '');
-    slDescriptions[item.id] = slText;
-
-    // Step 2: get secondary text (only if client is not SI)
-    if (secondaryLang) {
-      let secText: string;
-      if (secondaryLang === 'IT') {
-        // Try static normalization SL → IT first
-        secText = normalizeSLtoIT(slText);
-        // If no change, fall back to DeepL with date preservation
-        if (secText === slText && settings.deepl_webhook_url) {
-          secText = await translateWithDatePreservation(slText, 'IT', settings.deepl_webhook_url);
-        }
-      } else {
-        // EN: use DeepL with date preservation
-        secText = await translateWithDatePreservation(slText, 'EN', settings.deepl_webhook_url || '');
-      }
-      if (secText !== slText) {
-        secDescriptions[item.id] = secText;
-      }
-    }
-  }
-
-  // Build table body
+  // Build table body — translate each item via biDesc
   const tableBody: object[][] = [];
 
   for (const item of items) {
@@ -316,17 +344,23 @@ export async function generateInvoicePDF(
       continue;
     }
 
-    const primaryDesc = sanitize(slDescriptions[item.id] ?? item.description);
+    let desc = await biDesc(item.description, item.code, inputLang);
+
+    // Safety check: Italian clients MUST have Italian secondary
+    if (secondaryLang === 'IT' && !desc.secondary && desc.primary) {
+      const itFallback = normalizeSLtoIT(item.description) !== item.description
+        ? normalizeSLtoIT(item.description)
+        : item.description;
+      desc = { ...desc, secondary: sanitize(itFallback) };
+    }
+
     const showTrans = item.show_translation !== false;
-    const secondaryDesc =
-      showTrans && secondaryLang
-        ? sanitize(secDescriptions[item.id] || '')
-        : '';
+    const secondaryDesc = showTrans && desc.secondary ? desc.secondary : '';
 
     const descContent =
-      secondaryDesc && secondaryDesc !== primaryDesc
-        ? { content: primaryDesc + '\n' + secondaryDesc, styles: { fontSize: 7, cellPadding: { top: 1.5, right: 2, bottom: 1.5, left: 2 } } }
-        : { content: primaryDesc, styles: { fontSize: 7.5 } };
+      secondaryDesc && secondaryDesc !== desc.primary
+        ? { content: desc.primary + '\n' + secondaryDesc, styles: { fontSize: 7, cellPadding: { top: 1.5, right: 2, bottom: 1.5, left: 2 } } }
+        : { content: desc.primary, styles: { fontSize: 7.5 } };
 
     if (item.line_type === 'text') {
       tableBody.push([
@@ -345,6 +379,27 @@ export async function generateInvoicePDF(
         { content: item.total > 0 ? `${formatCurrency(item.total)} EUR` : '' },
       ]);
     }
+  }
+
+  // Contract reference row — use stored IT/SL values directly, no translation
+  if (invoice.contract_ref_sl || invoice.contract_ref_it) {
+    const contractPrimary = sanitize(invoice.contract_ref_sl || '');
+    const contractSecondary =
+      secondaryLang === 'IT' ? sanitize(invoice.contract_ref_it || '') :
+      secondaryLang === 'EN' ? sanitize(invoice.contract_ref_it || '') :
+      null;
+    tableBody.push([
+      { content: '' },
+      {
+        content: contractSecondary && contractSecondary !== contractPrimary
+          ? contractPrimary + '\n' + contractSecondary
+          : contractPrimary,
+        styles: { fontSize: 7.5 },
+      },
+      { content: '' },
+      { content: '' },
+      { content: '' },
+    ]);
   }
 
   // Reverse charge disclaimer row
