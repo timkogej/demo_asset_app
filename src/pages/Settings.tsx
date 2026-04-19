@@ -4,18 +4,23 @@ import {
   ChevronUp,
   Upload,
   Check,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  ChevronRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import { clearSettingsCache } from '../lib/settings';
-import type { Language, Settings } from '../types';
+import type { Language, Settings, InvoiceTemplate, InvoiceTemplateLine, InvoiceType } from '../types';
+import { TEMPLATE_VARIABLES } from '../lib/invoiceVariables';
 
 interface SettingsProps {
   t: (key: string) => string;
   language: Language;
 }
 
-type SectionKey = 'company' | 'banking' | 'invoices' | 'email';
+type SectionKey = 'company' | 'banking' | 'invoices' | 'email' | 'templates';
 
 const COUNTRIES = ['SI', 'IT', 'HR', 'DE', 'AT', 'FR', 'HU', 'RO', 'SK', 'CZ'];
 
@@ -48,6 +53,85 @@ function FieldLabel({ text }: { text: string }) {
   return <label className="label block mb-1">{text}</label>;
 }
 
+function VariableAutocomplete({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [showVars, setShowVars] = useState(false);
+  const [cursorPos, setCursorPos] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value;
+    onChange(val);
+    const sel = e.target.selectionStart ?? 0;
+    const lastBrace = val.lastIndexOf('{', sel - 1);
+    if (lastBrace !== -1 && sel > lastBrace) {
+      setShowVars(true);
+      setCursorPos(lastBrace);
+    } else {
+      setShowVars(false);
+    }
+  }
+
+  function insertVariable(varKey: string) {
+    const after = value.substring(cursorPos).replace(/^\{[^}]*/, '');
+    const newVal = value.substring(0, cursorPos) + varKey + after;
+    onChange(newVal);
+    setShowVars(false);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  return (
+    <div style={{ position: 'relative', flex: 1 }}>
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={handleChange}
+        onBlur={() => setTimeout(() => setShowVars(false), 150)}
+        className="input-field w-full"
+        style={{ fontSize: '13px' }}
+      />
+      {showVars && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            zIndex: 9999,
+            background: 'white',
+            border: '1px solid #a8d4b3',
+            borderRadius: '8px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            minWidth: '300px',
+            maxHeight: '240px',
+            overflowY: 'auto',
+          }}
+        >
+          {TEMPLATE_VARIABLES.map((v) => (
+            <div
+              key={v.key}
+              onMouseDown={() => insertVariable(v.key)}
+              style={{ padding: '7px 12px', cursor: 'pointer', fontSize: '12px' }}
+              className="hover:bg-accent-soft"
+            >
+              <span style={{ fontWeight: 700, color: '#1a4731', fontFamily: 'monospace' }}>
+                {v.key}
+              </span>
+              <span style={{ color: '#6b8f75', marginLeft: '8px' }}>
+                {v.label_sl} / {v.label_it}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Settings({ t }: SettingsProps) {
   const [openSection, setOpenSection] = useState<SectionKey>('company');
   const [loading, setLoading] = useState(true);
@@ -59,6 +143,12 @@ export default function Settings({ t }: SettingsProps) {
   const [logoVarentUploading, setLogoVarentUploading] = useState(false);
   const [testingWebhook, setTestingWebhook] = useState(false);
   const [showDeeplKey, setShowDeeplKey] = useState(false);
+
+  // Template state
+  const [templates, setTemplates] = useState<InvoiceTemplate[]>([]);
+  const [activeTemplateType, setActiveTemplateType] = useState<InvoiceType>('monthly_rent');
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [expandedVars, setExpandedVars] = useState(false);
 
   const originalRef = useRef<Partial<Settings>>({});
 
@@ -116,9 +206,107 @@ export default function Settings({ t }: SettingsProps) {
     }
   }, [t]);
 
+  const loadTemplates = useCallback(async () => {
+    const { data } = await supabase
+      .from('invoice_templates')
+      .select('*, lines:invoice_template_lines(*)')
+      .order('invoice_type');
+    if (data) {
+      data.forEach((tmpl: InvoiceTemplate) => {
+        tmpl.lines?.sort((a, b) => a.sort_order - b.sort_order);
+      });
+      setTemplates(data as InvoiceTemplate[]);
+    }
+  }, []);
+
   useEffect(() => {
     loadSettings();
-  }, [loadSettings]);
+    loadTemplates();
+  }, [loadSettings, loadTemplates]);
+
+  async function saveTemplate(template: InvoiceTemplate) {
+    setSavingTemplate(true);
+    try {
+      await supabase
+        .from('invoice_templates')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', template.id);
+
+      await supabase
+        .from('invoice_template_lines')
+        .delete()
+        .eq('template_id', template.id);
+
+      if (template.lines && template.lines.length > 0) {
+        await supabase
+          .from('invoice_template_lines')
+          .insert(
+            template.lines.map((line, i) => ({
+              template_id: template.id,
+              sort_order: i,
+              line_type: line.line_type,
+              content: line.content,
+              quantity: line.quantity ?? 1,
+              unit_price_var: line.unit_price_var ?? null,
+            }))
+          );
+      }
+
+      toast.success(t('settings.template_saved'));
+    } catch {
+      toast.error(t('error.save_failed'));
+    } finally {
+      setSavingTemplate(false);
+    }
+  }
+
+  function updateTemplate(type: InvoiceType, updater: (t: InvoiceTemplate) => InvoiceTemplate) {
+    setTemplates((prev) => prev.map((tmpl) => tmpl.invoice_type === type ? updater(tmpl) : tmpl));
+  }
+
+  function addLine(type: InvoiceType) {
+    updateTemplate(type, (tmpl) => ({
+      ...tmpl,
+      lines: [
+        ...(tmpl.lines || []),
+        {
+          id: crypto.randomUUID(),
+          template_id: tmpl.id,
+          sort_order: (tmpl.lines?.length ?? 0),
+          line_type: 'item',
+          content: '',
+          quantity: 1,
+          unit_price_var: null,
+        } as InvoiceTemplateLine,
+      ],
+    }));
+  }
+
+  function removeLine(type: InvoiceType, lineId: string) {
+    updateTemplate(type, (tmpl) => ({
+      ...tmpl,
+      lines: (tmpl.lines || []).filter((l) => l.id !== lineId),
+    }));
+  }
+
+  function moveLine(type: InvoiceType, lineId: string, dir: 'up' | 'down') {
+    updateTemplate(type, (tmpl) => {
+      const lines = [...(tmpl.lines || [])];
+      const idx = lines.findIndex((l) => l.id === lineId);
+      if (idx === -1) return tmpl;
+      const swapIdx = dir === 'up' ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= lines.length) return tmpl;
+      [lines[idx], lines[swapIdx]] = [lines[swapIdx], lines[idx]];
+      return { ...tmpl, lines };
+    });
+  }
+
+  function updateLine(type: InvoiceType, lineId: string, patch: Partial<InvoiceTemplateLine>) {
+    updateTemplate(type, (tmpl) => ({
+      ...tmpl,
+      lines: (tmpl.lines || []).map((l) => l.id === lineId ? { ...l, ...patch } : l),
+    }));
+  }
 
   function handleChange(
     field: keyof Settings,
@@ -848,6 +1036,220 @@ export default function Settings({ t }: SettingsProps) {
             </div>
           )}
         </div>
+        {/* ── SECTION 5: TEMPLATES ── */}
+        {(() => {
+          const INVOICE_TYPES: { type: InvoiceType; label: string }[] = [
+            { type: 'monthly_rent', label: 'Mesečna najemnina / Canone Mensile' },
+            { type: 'deposit',      label: 'Predplačilo/Polog / Anticipo' },
+            { type: 'penalties',    label: 'Kazni / Contravvenzioni' },
+            { type: 'insurance',    label: 'Zavarovanje / Assicurazione' },
+            { type: 'damage',       label: 'Škoda / Danni' },
+            { type: 'other',        label: 'Drugo / Altro' },
+          ];
+          const activeTemplate = templates.find((t) => t.invoice_type === activeTemplateType);
+
+          return (
+            <div
+              className="card rounded-10 overflow-hidden border-l-4"
+              style={{ borderLeftColor: '#a8d4b3' }}
+            >
+              <SectionHeader
+                title={t('settings.templates')}
+                open={openSection === 'templates'}
+                onToggle={() => toggleSection('templates')}
+              />
+              {openSection === 'templates' && (
+                <div className="px-5 pb-6 space-y-4 border-t border-accent-soft pt-4">
+                  {/* Type tabs */}
+                  <div className="flex flex-wrap gap-2">
+                    {INVOICE_TYPES.map(({ type, label }) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setActiveTemplateType(type)}
+                        className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                          activeTemplateType === type
+                            ? 'bg-primary text-white border-primary'
+                            : 'border-accent-muted text-text-muted hover:border-primary hover:text-primary'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Template editor */}
+                  {activeTemplate ? (
+                    <div className="space-y-3">
+                      {/* Lines list */}
+                      {(!activeTemplate.lines || activeTemplate.lines.length === 0) ? (
+                        <div
+                          className="text-center py-6 text-sm text-text-muted rounded-10"
+                          style={{ border: '1px dashed #c8e0cf' }}
+                        >
+                          Ni vrstic / Nessuna riga
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {activeTemplate.lines.map((line, idx) => (
+                            <div
+                              key={line.id}
+                              className="rounded-10 p-3 space-y-2"
+                              style={{ background: '#f8faf8', border: '1px solid #e8f0eb' }}
+                            >
+                              {/* Line type + reorder + delete */}
+                              <div className="flex items-center gap-2">
+                                {/* Type pills */}
+                                <div className="flex gap-1">
+                                  {(['text', 'item', 'space'] as InvoiceTemplateLine['line_type'][]).map((lt) => (
+                                    <button
+                                      key={lt}
+                                      type="button"
+                                      onClick={() => updateLine(activeTemplateType, line.id, { line_type: lt })}
+                                      className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                                        line.line_type === lt
+                                          ? 'bg-primary text-white border-primary'
+                                          : 'border-accent-muted text-text-muted hover:border-primary'
+                                      }`}
+                                    >
+                                      {lt === 'text'  ? t('settings.line_type_text')  :
+                                       lt === 'item'  ? t('settings.line_type_item')  :
+                                       t('settings.line_type_space')}
+                                    </button>
+                                  ))}
+                                </div>
+                                <div className="flex-1" />
+                                {/* Reorder */}
+                                <button
+                                  type="button"
+                                  disabled={idx === 0}
+                                  onClick={() => moveLine(activeTemplateType, line.id, 'up')}
+                                  className="text-text-muted hover:text-primary disabled:opacity-30"
+                                >
+                                  <ArrowUp size={14} strokeWidth={1.8} />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={idx === (activeTemplate.lines?.length ?? 0) - 1}
+                                  onClick={() => moveLine(activeTemplateType, line.id, 'down')}
+                                  className="text-text-muted hover:text-primary disabled:opacity-30"
+                                >
+                                  <ArrowDown size={14} strokeWidth={1.8} />
+                                </button>
+                                {/* Delete */}
+                                <button
+                                  type="button"
+                                  onClick={() => removeLine(activeTemplateType, line.id)}
+                                  className="text-text-muted hover:text-red-500"
+                                >
+                                  <Trash2 size={14} strokeWidth={1.8} />
+                                </button>
+                              </div>
+
+                              {/* Content input (hidden for space lines) */}
+                              {line.line_type !== 'space' && (
+                                <div className="flex gap-2 items-center">
+                                  <span className="text-xs text-text-muted w-16 shrink-0">Vsebina</span>
+                                  <VariableAutocomplete
+                                    value={line.content}
+                                    onChange={(v) => updateLine(activeTemplateType, line.id, { content: v })}
+                                  />
+                                </div>
+                              )}
+
+                              {/* Unit price var (item only) */}
+                              {line.line_type === 'item' && (
+                                <div className="flex gap-2 items-center">
+                                  <span className="text-xs text-text-muted w-16 shrink-0">
+                                    {t('settings.unit_price_var')}
+                                  </span>
+                                  <select
+                                    value={line.unit_price_var ?? ''}
+                                    onChange={(e) => updateLine(activeTemplateType, line.id, { unit_price_var: e.target.value || null })}
+                                    className="input-field"
+                                    style={{ fontSize: '12px', padding: '4px 8px' }}
+                                  >
+                                    <option value="">— brez / nessuno —</option>
+                                    {TEMPLATE_VARIABLES.filter((v) => v.category === 'financial').map((v) => (
+                                      <option key={v.key} value={v.key}>
+                                        {v.key} — {v.label_sl}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Add line + Save */}
+                      <div className="flex items-center gap-3 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => addLine(activeTemplateType)}
+                          className="btn-secondary text-xs flex items-center gap-1"
+                        >
+                          + {t('settings.add_line')}
+                        </button>
+                        <div className="flex-1" />
+                        <button
+                          type="button"
+                          onClick={() => saveTemplate(activeTemplate)}
+                          disabled={savingTemplate}
+                          className="btn-primary text-xs flex items-center gap-1"
+                        >
+                          {savingTemplate ? (
+                            <><span className="spinner w-3 h-3" /> Shranjevanje...</>
+                          ) : (
+                            <><Check size={13} strokeWidth={2} /> Shrani / Salva</>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Available variables collapsible */}
+                      <div
+                        className="rounded-10 overflow-hidden"
+                        style={{ border: '1px solid #e8f0eb' }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setExpandedVars((v) => !v)}
+                          className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-text-muted hover:bg-accent-soft"
+                        >
+                          <span>{t('settings.available_vars')}</span>
+                          <ChevronRight
+                            size={13}
+                            strokeWidth={1.8}
+                            className={`transition-transform ${expandedVars ? 'rotate-90' : ''}`}
+                          />
+                        </button>
+                        {expandedVars && (
+                          <div className="px-3 pb-3 flex flex-wrap gap-2">
+                            {TEMPLATE_VARIABLES.map((v) => (
+                              <span
+                                key={v.key}
+                                className="text-xs px-2 py-1 rounded-full font-mono"
+                                style={{ background: '#eaf4ed', color: '#1a4731', border: '1px solid #c8e0cf' }}
+                                title={`${v.description_sl} / ${v.description_it}`}
+                              >
+                                {v.key}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-text-muted py-4 text-center">
+                      Nalaganje predlog... / Caricamento modelli...
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── STICKY SAVE FOOTER ── */}

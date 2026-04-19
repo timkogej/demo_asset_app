@@ -211,17 +211,38 @@ export async function generateInvoicePDF(
     settings.logo_varent_url ? fetchLogoBase64(settings.logo_varent_url) : Promise.resolve(null),
   ]);
 
-  // ─── MANUTECNICA LOGO (top, centered) ────────────────────────────────────
+  // ─── MANUTECNICA LOGO (top, left-aligned) ────────────────────────────────
   if (logoManutecnica) {
-    doc.addImage(logoManutecnica, 'JPEG', 65, y, 80, 22);
-    y += 28;
+    doc.addImage(logoManutecnica, 'JPEG', marginL, y, 70, 20);
+    y += 26;
   } else {
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text('MANUTECNICA D.O.O.', 105, y + 8, { align: 'center' });
+    doc.text('MANUTECNICA D.O.O.', marginL, y + 8);
     doc.setFont('helvetica', 'normal');
     y += 16;
   }
+
+  // ─── COMPANY DATA (top right, same height as logo) ───────────────────────
+  const companyY = 12;
+  const companyRightEdge = marginR;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.text(sanitize(settings.company_name || 'MANUTECNICA D.O.O.'), companyRightEdge, companyY, { align: 'right' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.text(sanitize(settings.company_address || 'BREZNIKOVA ULICA, 15'), companyRightEdge, companyY + 4, { align: 'right' });
+  doc.text(
+    `${sanitize(settings.company_postal || '1230')} - ${sanitize(settings.company_city || 'DOMZALE')} (${sanitize(settings.company_country || 'SI')})`,
+    companyRightEdge, companyY + 8, { align: 'right' }
+  );
+  doc.text(`DDV ${sanitize(settings.company_tax_number || 'SI51128551')}`, companyRightEdge, companyY + 12, { align: 'right' });
+  if (settings.company_reg_number) {
+    doc.text(`Mat. ${sanitize(settings.company_reg_number)}`, companyRightEdge, companyY + 16, { align: 'right' });
+  }
+  doc.text(sanitize(settings.company_email || ''), companyRightEdge, companyY + 20, { align: 'right' });
+
+  y = Math.max(y, companyY + 26);
 
   // ─── INVOICE NUMBER BOX (left) ───────────────────────────────────────────
   const boxY = y;
@@ -319,14 +340,15 @@ export async function generateInvoicePDF(
 
   if (invoice.service_period) {
     const serviceLabel = sanitize(bi('Datum opr. Storitev:'));
+    const labelStartX = 83;
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    doc.text(serviceLabel, 83, y + 5);
-    const biPeriod = getBilingualPeriod(invoice.service_period, secondaryLang);
+    const labelWidth = doc.getTextWidth(serviceLabel);
+    doc.text(serviceLabel, labelStartX, dateRowY + 5);
+    const biPeriod = sanitize(getBilingualPeriod(invoice.service_period, secondaryLang));
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
-    const labelWidth = doc.getTextWidth(serviceLabel);
-    doc.text(sanitize(biPeriod), 83 + labelWidth + 3, y + 5);
+    doc.text(biPeriod, labelStartX + labelWidth + 2, dateRowY + 5);
     doc.setFont('helvetica', 'normal');
   }
 
@@ -335,12 +357,28 @@ export async function generateInvoicePDF(
   // ─── ITEMS TABLE ─────────────────────────────────────────────────────────
   const items = invoice.items || [];
 
+  function isPurelyNumeric(text: string): boolean {
+    return /^[\d\s.,€$/+-]+$/.test(text.trim());
+  }
+
   // Build table body — translate each item via biDesc
   const tableBody: object[][] = [];
 
   for (const item of items) {
     if (item.line_type === 'space') {
       tableBody.push([{ content: '' }, { content: '' }, { content: '' }, { content: '' }, { content: '' }]);
+      continue;
+    }
+
+    // Skip translation for purely numeric content
+    if (isPurelyNumeric(item.description)) {
+      tableBody.push([
+        { content: item.code || '' },
+        { content: sanitize(item.description), styles: { fontSize: 7.5 } },
+        { content: item.quantity === 1 ? '1' : String(item.quantity || 0) },
+        { content: item.unit_price > 0 ? `${formatCurrency(item.unit_price)} EUR` : '' },
+        { content: item.total > 0 ? `${formatCurrency(item.total)} EUR` : '' },
+      ]);
       continue;
     }
 
@@ -539,25 +577,15 @@ export async function generateInvoicePDF(
   });
 
   // ─── FOOTER ──────────────────────────────────────────────────────────────
-  const footerY = 268;
+  const footerY = 275;
+
+  doc.setDrawColor(180);
+  doc.setLineWidth(0.2);
+  doc.line(marginL, footerY - 2, marginR, footerY - 2);
 
   if (varentLogoBase64) {
-    doc.addImage(varentLogoBase64, 'JPEG', 77, footerY - 18, 55, 16);
+    doc.addImage(varentLogoBase64, 'JPEG', 70, footerY + 2, 70, 18);
   }
-
-  doc.setFontSize(6.5);
-  doc.setFont('helvetica', 'bold');
-  doc.text('MANUTECNICA D.O.O.', 105, footerY + 6, { align: 'center' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6);
-  doc.text(
-    `BREZNIKOVA ULICA, 15 - 1230 DOMZALE - SLOVENIJA - DDV SI 51128551 - OSNOVNI KAPITAL EUR ${sanitize(settings.company_share_capital || '7.500,00')}`,
-    105, footerY + 10, { align: 'center' }
-  );
-  doc.text(
-    `e-mail: ${sanitize(settings.company_email || 'manutecnica.doo@gmail.com')}`,
-    105, footerY + 14, { align: 'center' }
-  );
 
   return doc.output('blob');
 }

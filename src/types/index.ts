@@ -202,6 +202,26 @@ export interface InvoiceRecord {
   payment_schedules?: InvoicePaymentSchedule[];
 }
 
+export interface InvoiceTemplateLine {
+  id: string;
+  template_id: string;
+  sort_order: number;
+  line_type: 'item' | 'text' | 'space';
+  content: string;
+  quantity: number | null;
+  unit_price_var: string | null;
+}
+
+export interface InvoiceTemplate {
+  id: string;
+  invoice_type: InvoiceType;
+  name_it: string;
+  name_sl: string;
+  created_at: string;
+  updated_at: string;
+  lines?: InvoiceTemplateLine[];
+}
+
 export interface Settings {
   id: number;
   company_name: string | null;

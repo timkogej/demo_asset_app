@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Eye, Send, Download, CheckCircle, AlertTriangle, X, FileText, Plus, Trash2,
   ChevronUp, ChevronDown, Pencil, ChevronLeft, ChevronRight,
@@ -17,9 +17,11 @@ import {
   getItalianMonth,
 } from '../lib/invoiceCalculations';
 import { generateInvoicePDF } from '../lib/pdfGenerator';
+import { resolveVariables, resolveUnitPrice } from '../lib/invoiceVariables';
 import type {
   Language, InvoiceRecord, InvoiceStatus, InvoiceType,
   InvoiceItem, Client, Vehicle, Settings, Payment, InvoiceCode,
+  InvoiceTemplate,
 } from '../types';
 
 interface InvoicesProps {
@@ -366,7 +368,7 @@ function CodeInput({ value, onChange, onCodeSelect, codes }: {
 
 // ---- main component ----
 
-export default function Invoices({ t, language: _language }: InvoicesProps) {
+export default function Invoices({ t, language }: InvoicesProps) {
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
   const { username } = useAuth();
@@ -396,6 +398,9 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   const [genMonth, setGenMonth] = useState(currentMonth);
   const [genYear, setGenYear] = useState(currentYear);
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [genDueDateMode, setGenDueDateMode] = useState<'default' | 'custom'>('default');
+  const [genCustomDueDate, setGenCustomDueDate] = useState('');
+  const [genDueDays, setGenDueDays] = useState(14);
 
   // preview
   const [previewInvoice, setPreviewInvoice] = useState<InvoiceRecord | null>(null);
@@ -409,6 +414,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
 
   // cancel
   const [cancelTarget, setCancelTarget] = useState<InvoiceRecord | null>(null);
+  const [cancelIsLastInvoice, setCancelIsLastInvoice] = useState(false);
 
   // mark paid modal
   const [markPaidTarget, setMarkPaidTarget] = useState<InvoiceRecord | null>(null);
@@ -418,6 +424,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   const [formStep, setFormStep] = useState(1);
   const [form, setForm] = useState<ManualForm>(BLANK_FORM);
   const [filteredVehicles, setFilteredVehicles] = useState<Vehicle[]>([]);
+  const [clientError, setClientError] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [formPdfUrl, setFormPdfUrl] = useState<string | null>(null);
   const [formPdfLoading, setFormPdfLoading] = useState(false);
@@ -553,6 +560,9 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       toast.error(t('inv.webhook_not_configured'));
       return;
     }
+    setGenDueDays(settings.payment_due_days ?? 14);
+    setGenDueDateMode('default');
+    setGenCustomDueDate('');
     setShowGenerateConfirm(true);
   }
 
@@ -565,7 +575,13 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       const response = await fetch(settings.n8n_monthly_webhook_url!, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month: genMonth, year: genYear, invoice_date: invoiceDate, triggered_by: 'App' }),
+        body: JSON.stringify({
+          month: genMonth,
+          year: genYear,
+          invoice_date: invoiceDate,
+          due_date: genDueDateMode === 'custom' ? genCustomDueDate : genDefaultDueDate,
+          triggered_by: username || 'App',
+        }),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -640,6 +656,46 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       );
     }
     return fullInvoice;
+  }
+
+  async function ensureInvoiceHasItems(invoice: InvoiceRecord) {
+    const { data: existingItems } = await supabase
+      .from('invoice_items')
+      .select('id')
+      .eq('invoice_id', invoice.id);
+
+    if (existingItems && existingItems.length > 0) return;
+
+    const { data: template } = await supabase
+      .from('invoice_templates')
+      .select('*, lines:invoice_template_lines(*)')
+      .eq('invoice_type', invoice.invoice_type)
+      .single() as { data: InvoiceTemplate | null };
+
+    if (!template?.lines || template.lines.length === 0) return;
+
+    const vData = invoice.vehicle as unknown as Record<string, unknown> | undefined;
+    const cData = invoice.client as unknown as Record<string, unknown> | undefined;
+
+    const resolvedLines = template.lines
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((line, i) => ({
+        invoice_id: invoice.id,
+        sort_order: i,
+        line_type: line.line_type,
+        description: resolveVariables(line.content, {
+          vehicle: vData ?? null,
+          client: cData ?? null,
+          servicePeriod: invoice.service_period ?? '',
+          invoiceDate: invoice.invoice_date,
+          contractDate: invoice.vehicle?.lease_start_date ?? undefined,
+        }),
+        quantity: line.quantity ?? 1,
+        unit_price: resolveUnitPrice(line.unit_price_var, vData ?? null),
+        show_translation: line.line_type !== 'space',
+      }));
+
+    await supabase.from('invoice_items').insert(resolvedLines);
   }
 
   // ---- preview ----
@@ -862,20 +918,50 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     }
   }
 
-  // ---- cancel ----
+  // ---- cancel / delete ----
+
+  async function openCancelModal(invoice: InvoiceRecord) {
+    try {
+      const { data: lastInvoice } = await supabase
+        .from('invoices')
+        .select('id')
+        .eq('invoice_year', invoice.invoice_year)
+        .neq('status', 'cancelled')
+        .order('invoice_sequence', { ascending: false })
+        .limit(1)
+        .single();
+      setCancelIsLastInvoice(lastInvoice?.id === invoice.id);
+    } catch {
+      setCancelIsLastInvoice(false);
+    }
+    setCancelTarget(invoice);
+  }
 
   async function handleCancel() {
     if (!cancelTarget) return;
     try {
-      await supabase
-        .from('invoices')
-        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-        .eq('id', cancelTarget.id);
-      setInvoices((prev) =>
-        prev.map((i) => (i.id === cancelTarget.id ? { ...i, status: 'cancelled' } : i))
-      );
+      if (cancelIsLastInvoice) {
+        await supabase.from('invoice_items').delete().eq('invoice_id', cancelTarget.id);
+        await supabase.from('invoice_payment_schedules').delete().eq('invoice_id', cancelTarget.id);
+        await supabase.from('payments').delete().eq('invoice_id', cancelTarget.id);
+        await supabase.from('invoices').delete().eq('id', cancelTarget.id);
+        await supabase
+          .from('invoice_sequences')
+          .update({ last_number: cancelTarget.invoice_sequence - 1 })
+          .eq('year', cancelTarget.invoice_year);
+        setInvoices((prev) => prev.filter((i) => i.id !== cancelTarget.id));
+        toast.success(t('inv.deleted_permanently'));
+      } else {
+        await supabase
+          .from('invoices')
+          .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+          .eq('id', cancelTarget.id);
+        setInvoices((prev) =>
+          prev.map((i) => (i.id === cancelTarget.id ? { ...i, status: 'cancelled' } : i))
+        );
+        toast.success(t('inv.cancelled'));
+      }
       setCancelTarget(null);
-      toast.success(t('inv.cancel'));
     } catch {
       toast.error(t('error.save_failed'));
     }
@@ -900,7 +986,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
         contractRefIt: settings?.contract_ref_it || '',
         contractRefSl: settings?.contract_ref_sl || '',
         servicePeriod: getItalianMonth(new Date().getMonth(), currentYear),
-        items: buildDefaultItems('monthly_rent', '', '', '', '', 0, false, ''),
+        items: [],
       });
       setFormStep(1);
       setFormPdfUrl(null);
@@ -932,48 +1018,41 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     return { number: data[0].invoice_number, sequence: data[0].sequence_number };
   }
 
-  function buildDefaultItems(
-    type: InvoiceType,
-    contractRefIt: string,
-    contractRefSl: string,
-    vehicleName: string,
-    regNumber: string,
-    unitPrice: number,
-    _isRC: boolean,
-    servicePeriod: string
-  ): FormItem[] {
-    if (type === 'monthly_rent') {
-      return [
-        { id: newItemId(), code: '', description: contractRefIt, quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
-        { id: newItemId(), code: '', description: contractRefSl, quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
-        { id: newItemId(), code: '', description: 'NOLEGGIO LUNGO TERMINE', quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
-        { id: newItemId(), code: '', description: vehicleName, quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
-        { id: newItemId(), code: '', description: regNumber ? `TARGA ${regNumber}` : '', quantity: 1, unit_price: 0, line_type: 'text', show_translation: true },
-        { id: newItemId(), code: '', description: servicePeriod ? `CANONE MESE DI ${servicePeriod.toUpperCase()}` : 'CANONE MENSILE', quantity: 1, unit_price: unitPrice, line_type: 'item', show_translation: true },
-        { id: newItemId(), code: '', description: '', quantity: 1, unit_price: 0, line_type: 'space', show_translation: false },
-      ];
-    }
-    if (type === 'deposit') {
-      return [
-        { id: newItemId(), code: '', description: 'ANTICIPO CONTRATTUALE', quantity: 1, unit_price: unitPrice, line_type: 'item', show_translation: true },
-      ];
-    }
-    if (type === 'penalties') {
-      return [
-        { id: newItemId(), code: '', description: 'ADDEBITO CONTRAVVENZIONI', quantity: 1, unit_price: unitPrice, line_type: 'item', show_translation: true },
-      ];
-    }
-    if (type === 'insurance') {
-      return [
-        { id: newItemId(), code: '', description: 'ADDEBITO ASSICURAZIONE', quantity: 1, unit_price: unitPrice, line_type: 'item', show_translation: true },
-      ];
-    }
-    if (type === 'damage') {
-      return [
-        { id: newItemId(), code: '', description: 'RISARCIMENTO DANNI', quantity: 1, unit_price: unitPrice, line_type: 'item', show_translation: true },
-      ];
-    }
-    return [];
+  async function loadTemplateForType(
+    invoiceType: InvoiceType,
+    vehicle: Vehicle | undefined,
+    client: Client | undefined,
+    servicePeriod: string,
+    invoiceDate: string
+  ): Promise<FormItem[]> {
+    const { data: template } = await supabase
+      .from('invoice_templates')
+      .select('*, lines:invoice_template_lines(*)')
+      .eq('invoice_type', invoiceType)
+      .single() as { data: InvoiceTemplate | null };
+
+    if (!template?.lines || template.lines.length === 0) return [];
+
+    template.lines.sort((a, b) => a.sort_order - b.sort_order);
+
+    const vData = vehicle as unknown as Record<string, unknown> | undefined;
+    const cData = client as unknown as Record<string, unknown> | undefined;
+
+    return template.lines.map((line) => ({
+      id: newItemId(),
+      code: '',
+      description: resolveVariables(line.content, {
+        vehicle: vData ?? null,
+        client: cData ?? null,
+        servicePeriod,
+        invoiceDate,
+        contractDate: vehicle?.lease_start_date ?? undefined,
+      }),
+      quantity: line.quantity ?? 1,
+      unit_price: resolveUnitPrice(line.unit_price_var, vData ?? null),
+      line_type: line.line_type,
+      show_translation: line.line_type !== 'space',
+    }));
   }
 
   function handleClientSelect(clientId: string) {
@@ -981,6 +1060,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     if (!client) return;
     const clientVehicles = vehicles.filter((v) => v.client_id === clientId);
     setFilteredVehicles(clientVehicles);
+    setClientError(false);
     setForm((f) => ({ ...f, clientId, vehicleId: '', isReverseCharge: false, viesStatus: 'idle' }));
 
     // VIES check
@@ -1005,38 +1085,41 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
     }
   }
 
-  function handleVehicleSelect(vehicleId: string) {
-    const vehicle = vehicles.find((v) => v.id === vehicleId);
-    if (!vehicle) return;
-    const unitPrice = vehicle.received_installment || 0;
-    const settings_contract_it = form.contractRefIt;
-    const settings_contract_sl = form.contractRefSl;
-    const refDate = vehicle.lease_start_date || form.invoiceDate;
-    const contractRefIt = `${settings_contract_it} ${formatDate(refDate)}`.trim();
-    const contractRefSl = `${settings_contract_sl} ${formatDate(refDate)}`.trim();
-    setForm((f) => ({
-      ...f,
-      vehicleId,
-      items: buildDefaultItems(
-        f.invoiceType, contractRefIt, contractRefSl,
-        vehicle.vehicle_name || '', vehicle.registration_number,
-        unitPrice, f.isReverseCharge, f.servicePeriod
-      ),
-    }));
+  function handleNextStep1() {
+    if (!form.clientId) {
+      toast.error(t('inv.client_required'));
+      setClientError(true);
+      return;
+    }
+    setClientError(false);
+    setFormStep(2);
   }
 
-  function handleTypeChange(type: InvoiceType) {
+  async function handleVehicleSelect(vehicleId: string) {
+    const vehicle = vehicles.find((v) => v.id === vehicleId);
+    if (!vehicle) return;
+    setForm((f) => ({ ...f, vehicleId }));
+    const client = clients.find((c) => c.id === (vehicle.client_id ?? ''));
+    const items = await loadTemplateForType(
+      form.invoiceType, vehicle, client, form.servicePeriod, form.invoiceDate
+    );
+    const settings = await getSettings();
+    const contractDate = vehicle.lease_start_date
+      ? (() => { const d = new Date(vehicle.lease_start_date!); return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`; })()
+      : '';
+    const contractRefIt = `${settings?.contract_ref_it || 'Riferimento contratto del'} ${contractDate}`.trim();
+    const contractRefSl = `${settings?.contract_ref_sl || 'Opravljene storitve po pogodbi z dne'} ${contractDate}`.trim();
+    setForm((f) => ({ ...f, vehicleId, items, contractRefIt, contractRefSl }));
+  }
+
+  async function handleTypeChange(type: InvoiceType) {
+    setForm((f) => ({ ...f, invoiceType: type }));
     const vehicle = vehicles.find((v) => v.id === form.vehicleId);
-    const unitPrice = vehicle?.received_installment || 0;
-    setForm((f) => ({
-      ...f,
-      invoiceType: type,
-      items: buildDefaultItems(
-        type, f.contractRefIt, f.contractRefSl,
-        vehicle?.vehicle_name || '', vehicle?.registration_number || '',
-        unitPrice, f.isReverseCharge, f.servicePeriod
-      ),
-    }));
+    const client = clients.find((c) => c.id === (vehicle?.client_id ?? ''));
+    const items = await loadTemplateForType(
+      type, vehicle, client, form.servicePeriod, form.invoiceDate
+    );
+    setForm((f) => ({ ...f, invoiceType: type, items }));
   }
 
   // live totals
@@ -1433,20 +1516,23 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
       const settings = await getFormSettings();
 
       await supabase.from('invoices').update({
-        invoice_type: form.invoiceType,
-        invoice_date: form.invoiceDate,
-        service_period: form.servicePeriod,
-        due_date: form.dueDate,
-        contract_ref_it: form.contractRefIt,
-        contract_ref_sl: form.contractRefSl,
+        invoice_type:     form.invoiceType,
+        client_id:        form.clientId || null,
+        vehicle_id:       form.vehicleId || null,
+        invoice_date:     form.invoiceDate,
+        service_period:   form.servicePeriod,
+        due_date:         form.dueDate,
+        contract_ref_it:  form.contractRefIt,
+        contract_ref_sl:  form.contractRefSl,
         is_reverse_charge: form.isReverseCharge,
-        subtotal: formTotals.subtotal,
-        vat_rate: settings?.vat_rate ?? 22,
-        vat_amount: formTotals.vatAmount,
-        total: formTotals.total,
-        input_language: form.inputLanguage,
-        notes: form.notes,
-        updated_at: new Date().toISOString(),
+        subtotal:         formTotals.subtotal,
+        vat_rate:         settings?.vat_rate ?? 22,
+        vat_amount:       formTotals.vatAmount,
+        total:            formTotals.total,
+        language:         clients.find((c) => c.id === form.clientId)?.country === 'SI' ? 'sl' : 'it',
+        input_language:   form.inputLanguage,
+        notes:            form.notes,
+        updated_at:       new Date().toISOString(),
       }).eq('id', editingInvoice.id);
 
       await supabase.from('invoice_items').delete().eq('invoice_id', editingInvoice.id);
@@ -1509,7 +1595,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
 
       closeManualForm();
       await fetchInvoices();
-      toast.success('Račun posodobljen / Fattura aggiornata');
+      toast.success(t('inv.updated'));
     } catch {
       toast.error(t('error.save_failed'));
     } finally {
@@ -1518,6 +1604,12 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
   }
 
   const years = [currentYear - 1, currentYear, currentYear + 1];
+
+  const genDefaultDueDate = useMemo(() => {
+    const d = new Date(invoiceDate);
+    d.setDate(d.getDate() + genDueDays);
+    return d.toISOString().split('T')[0];
+  }, [invoiceDate, genDueDays]);
 
   // ---- render ----
 
@@ -1737,7 +1829,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                         )}
                         {(inv.status === 'draft' || inv.status === 'confirmed') && (
                           <button
-                            onClick={() => setCancelTarget(inv)}
+                            onClick={() => openCancelModal(inv)}
                             className="p-1.5 rounded hover:bg-red-50 text-text-muted hover:text-danger transition-colors"
                             title={t('inv.cancel')}
                           >
@@ -1850,6 +1942,50 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
               />
               <p className="text-xs text-text-muted mt-1">{t('inv.invoice_date_note')}</p>
             </div>
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-text-muted mb-2">
+                {language === 'sl' ? 'Rok plačila' : 'Scadenza'}
+              </label>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="genDueDateMode"
+                    value="default"
+                    checked={genDueDateMode === 'default'}
+                    onChange={() => setGenDueDateMode('default')}
+                    className="accent-primary"
+                  />
+                  <span className="text-sm text-text-muted">
+                    {t('inv.due_date_default')} ({genDueDays} {language === 'sl' ? 'dni' : 'giorni'})
+                    {genDefaultDueDate && (
+                      <span className="ml-1 font-medium text-text-dark">
+                        → {new Date(genDefaultDueDate).toLocaleDateString(language === 'sl' ? 'sl-SI' : 'it-IT')}
+                      </span>
+                    )}
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="genDueDateMode"
+                    value="custom"
+                    checked={genDueDateMode === 'custom'}
+                    onChange={() => setGenDueDateMode('custom')}
+                    className="accent-primary"
+                  />
+                  <span className="text-sm text-text-muted shrink-0">{t('inv.due_date_custom')}:</span>
+                  {genDueDateMode === 'custom' && (
+                    <input
+                      type="date"
+                      value={genCustomDueDate || genDefaultDueDate}
+                      onChange={(e) => setGenCustomDueDate(e.target.value)}
+                      className="input-field flex-1 text-sm"
+                    />
+                  )}
+                </label>
+              </div>
+            </div>
             <p className="text-sm text-text-muted mb-1">
               {t('inv.generate_confirm_title').replace('?', '')} — <strong>{MONTHS[genMonth - 1]} {genYear}</strong>
             </p>
@@ -1933,16 +2069,24 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
         </div>
       )}
 
-      {/* ---- Cancel confirm modal ---- */}
+      {/* ---- Cancel / Delete confirm modal ---- */}
       {cancelTarget && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setCancelTarget(null)}>
           <div className="bg-white rounded-10 shadow-xl p-6 max-w-sm w-full animate-slideIn" onClick={(e) => e.stopPropagation()}>
-            <h3 className="section-title mb-3">{t('inv.cancel')}</h3>
-            <p className="text-sm text-text-muted mb-1">{t('inv.confirm_cancel')}</p>
+            <h3 className="section-title mb-3">
+              {cancelIsLastInvoice ? t('inv.delete_last_title') : t('inv.cancel_title')}
+            </h3>
+            <p className="text-sm text-text-muted mb-1">
+              {cancelIsLastInvoice
+                ? t('inv.delete_last_body').replace('{number}', cancelTarget.invoice_number)
+                : t('inv.cancel_body').replace('{number}', cancelTarget.invoice_number)}
+            </p>
             <p className="text-sm font-semibold text-text-dark mb-4">{cancelTarget.invoice_number}</p>
             <div className="flex justify-end gap-3">
               <button onClick={() => setCancelTarget(null)} className="btn-secondary">{t('btn.cancel')}</button>
-              <button onClick={handleCancel} className="btn-danger">{t('inv.cancel')}</button>
+              <button onClick={handleCancel} className="btn-danger">
+                {cancelIsLastInvoice ? t('inv.delete_last_title') : t('inv.cancel_title')}
+              </button>
             </div>
           </div>
         </div>
@@ -2190,6 +2334,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                         value={form.clientId}
                         onChange={(e) => handleClientSelect(e.target.value)}
                         className="input-field"
+                        style={clientError ? { border: '1px solid #c0392b' } : undefined}
                       >
                         <option value="">— seleziona cliente —</option>
                         {clients.map((c) => (
@@ -2198,6 +2343,9 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                           </option>
                         ))}
                       </select>
+                      {clientError && (
+                        <p className="mt-1 text-xs text-danger">{t('inv.client_required')}</p>
+                      )}
                       {/* VIES status */}
                       {form.clientId && form.viesStatus !== 'idle' && (
                         <div className="mt-1 text-xs flex items-center gap-1">
@@ -2240,22 +2388,6 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
                           </option>
                         ))}
                       </select>
-                    </div>
-                    <div>
-                      <label className="label">{t('inv.contract_ref')} (IT)</label>
-                      <input
-                        value={form.contractRefIt}
-                        onChange={(e) => setForm((f) => ({ ...f, contractRefIt: e.target.value }))}
-                        className="input-field"
-                      />
-                    </div>
-                    <div>
-                      <label className="label">{t('inv.contract_ref')} (SL)</label>
-                      <input
-                        value={form.contractRefSl}
-                        onChange={(e) => setForm((f) => ({ ...f, contractRefSl: e.target.value }))}
-                        className="input-field"
-                      />
                     </div>
                     {/* RC badge */}
                     <div className="flex items-center gap-2">
@@ -2602,7 +2734,7 @@ export default function Invoices({ t, language: _language }: InvoicesProps) {
               <div className="flex gap-3">
                 {formStep < 3 && (
                   <button
-                    onClick={() => formStep === 2 ? goToStep3() : setFormStep((s) => s + 1)}
+                    onClick={() => formStep === 2 ? goToStep3() : handleNextStep1()}
                     className="btn-primary text-sm"
                   >
                     Avanti →
