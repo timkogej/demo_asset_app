@@ -577,14 +577,14 @@ export async function generateInvoicePDF(
   });
 
   // ─── FOOTER ──────────────────────────────────────────────────────────────
-  const footerY = 275;
+  const footerY = 268;
 
   doc.setDrawColor(180);
   doc.setLineWidth(0.2);
   doc.line(marginL, footerY - 2, marginR, footerY - 2);
 
   if (varentLogoBase64) {
-    doc.addImage(varentLogoBase64, 'JPEG', 70, footerY + 2, 70, 18);
+    doc.addImage(varentLogoBase64, 'JPEG', 70, footerY + 2, 70, 26);
   }
 
   return doc.output('blob');
