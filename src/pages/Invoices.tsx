@@ -658,45 +658,6 @@ export default function Invoices({ t, language }: InvoicesProps) {
     return fullInvoice;
   }
 
-  async function ensureInvoiceHasItems(invoice: InvoiceRecord) {
-    const { data: existingItems } = await supabase
-      .from('invoice_items')
-      .select('id')
-      .eq('invoice_id', invoice.id);
-
-    if (existingItems && existingItems.length > 0) return;
-
-    const { data: template } = await supabase
-      .from('invoice_templates')
-      .select('*, lines:invoice_template_lines(*)')
-      .eq('invoice_type', invoice.invoice_type)
-      .single() as { data: InvoiceTemplate | null };
-
-    if (!template?.lines || template.lines.length === 0) return;
-
-    const vData = invoice.vehicle as unknown as Record<string, unknown> | undefined;
-    const cData = invoice.client as unknown as Record<string, unknown> | undefined;
-
-    const resolvedLines = template.lines
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .map((line, i) => ({
-        invoice_id: invoice.id,
-        sort_order: i,
-        line_type: line.line_type,
-        description: resolveVariables(line.content, {
-          vehicle: vData ?? null,
-          client: cData ?? null,
-          servicePeriod: invoice.service_period ?? '',
-          invoiceDate: invoice.invoice_date,
-          contractDate: invoice.vehicle?.lease_start_date ?? undefined,
-        }),
-        quantity: line.quantity ?? 1,
-        unit_price: resolveUnitPrice(line.unit_price_var, vData ?? null),
-        show_translation: line.line_type !== 'space',
-      }));
-
-    await supabase.from('invoice_items').insert(resolvedLines);
-  }
 
   // ---- preview ----
 
