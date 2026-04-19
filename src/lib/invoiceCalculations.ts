@@ -28,7 +28,9 @@ export function formatCurrency(amount: number): string {
 
 export function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
-  return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}/${d.getFullYear()}`;
 }
 
 export function calculateDueDate(invoiceDate: string, dueDays: number): string {

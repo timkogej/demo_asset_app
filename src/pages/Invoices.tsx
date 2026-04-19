@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Eye, Send, Download, CheckCircle, AlertTriangle, X, FileText, Plus, Trash2,
-  ChevronUp, ChevronDown, Pencil, ChevronLeft, ChevronRight,
+  ChevronUp, ChevronDown, Pencil, ChevronLeft, ChevronRight, Filter,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
@@ -58,9 +58,28 @@ function StatusBadge({ status, t }: { status: InvoiceStatus; t: (k: string) => s
 
 function TypeBadge({ type, t }: { type: InvoiceType; t: (k: string) => string }) {
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${TYPE_STYLES[type]}`}>
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${TYPE_STYLES[type]}`}>
       {t(`inv.type_${type}`)}
     </span>
+  );
+}
+
+function SelectFilter({ value, onChange, children }: {
+  value: string | number;
+  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative inline-flex">
+      <select
+        value={value}
+        onChange={onChange}
+        className="appearance-none bg-white border border-accent-muted rounded-lg pl-3 pr-7 py-1.5 text-sm text-text-dark focus:outline-none focus:border-primary cursor-pointer hover:border-primary transition-colors"
+      >
+        {children}
+      </select>
+      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={13} />
+    </div>
   );
 }
 
@@ -131,8 +150,8 @@ const INVOICE_STATUSES: InvoiceStatus[] = [
 ];
 
 const MONTHS = [
-  'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
-  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre',
+  'Januar', 'Februar', 'Marec', 'April', 'Maj', 'Junij',
+  'Julij', 'Avgust', 'September', 'Oktober', 'November', 'December',
 ];
 
 function newItemId() {
@@ -242,15 +261,18 @@ function MarkAsPaidModal({
           {/* Method */}
           <div>
             <label className="label">{t('pay.method_label')}</label>
-            <select
-              className="input-field"
-              value={form.method}
-              onChange={(e) => setForm((f) => ({ ...f, method: e.target.value }))}
-            >
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                className="appearance-none input-field pr-8 cursor-pointer"
+                value={form.method}
+                onChange={(e) => setForm((f) => ({ ...f, method: e.target.value }))}
+              >
+                {PAYMENT_METHODS.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={14} />
+            </div>
           </div>
 
           {/* Notes */}
@@ -389,6 +411,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
   const [filterStatus, setFilterStatus] = useState<InvoiceStatus | 'all'>('all');
   const [filterType, setFilterType] = useState<InvoiceType | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -1580,47 +1603,10 @@ export default function Invoices({ t, language }: InvoicesProps) {
 
   return (
     <div className="space-y-5 animate-fadeIn">
-      {/* ---- Top bar ---- */}
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="page-title flex-1 min-w-0">{t('inv.title')}</h2>
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Year */}
-          <select
-            value={filterYear}
-            onChange={(e) => setFilterYear(Number(e.target.value))}
-            className="input-field py-1.5 text-sm"
-          >
-            {years.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-          {/* Month */}
-          <select
-            value={filterMonth}
-            onChange={(e) => setFilterMonth(e.target.value === '' ? '' : Number(e.target.value))}
-            className="input-field py-1.5 text-sm"
-          >
-            <option value="">— {t('common.filter')} —</option>
-            {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
-          </select>
-          {/* Status filter */}
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as InvoiceStatus | 'all')}
-            className="input-field py-1.5 text-sm"
-          >
-            <option value="all">{t('common.filter')} status</option>
-            {INVOICE_STATUSES.map((s) => (
-              <option key={s} value={s}>{t(`inv.status_${s}`)}</option>
-            ))}
-          </select>
-          {/* Search */}
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('common.search')}
-            className="input-field py-1.5 text-sm min-w-[180px]"
-          />
-          {/* Actions */}
+      {/* ---- Title + action buttons (desktop: side by side, mobile: stacked) ---- */}
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="page-title">{t('inv.title')}</h2>
+        <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
           <button
             onClick={handleGenerateMonthlyClick}
             disabled={generating}
@@ -1637,6 +1623,83 @@ export default function Invoices({ t, language }: InvoicesProps) {
             {t('inv.new_manual')}
           </button>
         </div>
+      </div>
+
+      {/* Mobile: buttons below title */}
+      <div className="flex sm:hidden gap-2">
+        <button
+          onClick={handleGenerateMonthlyClick}
+          disabled={generating}
+          className="btn-secondary text-sm flex items-center gap-1.5 flex-1 justify-center"
+        >
+          <FileText size={15} />
+          {t('inv.generate_monthly')}
+        </button>
+        <button
+          onClick={() => { setShowManualForm(true); initManualForm(); }}
+          className="btn-primary text-sm flex items-center gap-1.5 flex-1 justify-center"
+        >
+          <Plus size={15} />
+          {t('inv.new_manual')}
+        </button>
+      </div>
+
+      {/* ---- Collapsible filters ---- */}
+      <div>
+        <button
+          onClick={() => setFiltersOpen((o) => !o)}
+          className="flex items-center gap-1.5 text-sm font-medium text-text-muted hover:text-text-dark transition-colors px-3 py-1.5 rounded-lg border border-accent-muted bg-white hover:bg-accent-soft"
+        >
+          <Filter size={14} />
+          Filtri
+          {filtersOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          {(filterMonth !== '' || filterStatus !== 'all' || searchQuery) && (
+            <span className="ml-1 w-2 h-2 rounded-full bg-primary inline-block" />
+          )}
+        </button>
+        {filtersOpen && (
+          <div className="mt-2 flex flex-wrap gap-2 items-center">
+            <SelectFilter
+              value={filterYear}
+              onChange={(e) => setFilterYear(Number(e.target.value))}
+            >
+              {years.map((y) => <option key={y} value={y}>{y}</option>)}
+            </SelectFilter>
+            <SelectFilter
+              value={filterMonth}
+              onChange={(e) => setFilterMonth(e.target.value === '' ? '' : Number(e.target.value))}
+            >
+              <option value="">— mesec —</option>
+              {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+            </SelectFilter>
+            <SelectFilter
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value as InvoiceStatus | 'all')}
+            >
+              <option value="all">— status —</option>
+              {INVOICE_STATUSES.map((s) => (
+                <option key={s} value={s}>{t(`inv.status_${s}`)}</option>
+              ))}
+            </SelectFilter>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('common.search')}
+              className="appearance-none bg-white border border-accent-muted rounded-lg pl-3 pr-3 py-1.5 text-sm text-text-dark focus:outline-none focus:border-primary transition-colors placeholder-text-muted"
+              style={{ minWidth: 160 }}
+            />
+            {(filterMonth !== '' || filterStatus !== 'all' || searchQuery) && (
+              <button
+                onClick={() => { setFilterMonth(''); setFilterStatus('all'); setSearchQuery(''); }}
+                className="text-xs text-text-muted hover:text-danger transition-colors flex items-center gap-1"
+              >
+                <X size={12} />
+                Počisti
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ---- Type filter pills ---- */}
@@ -1880,20 +1943,26 @@ export default function Invoices({ t, language }: InvoicesProps) {
               {t('inv.generate_monthly')}
             </h3>
             <div className="flex gap-3 mb-4">
-              <select
-                value={genMonth}
-                onChange={(e) => setGenMonth(Number(e.target.value))}
-                className="input-field flex-1"
-              >
-                {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
-              </select>
-              <select
-                value={genYear}
-                onChange={(e) => setGenYear(Number(e.target.value))}
-                className="input-field flex-1"
-              >
-                {years.map((y) => <option key={y} value={y}>{y}</option>)}
-              </select>
+              <div className="relative flex-1">
+                <select
+                  value={genMonth}
+                  onChange={(e) => setGenMonth(Number(e.target.value))}
+                  className="appearance-none input-field pr-8 cursor-pointer"
+                >
+                  {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={14} />
+              </div>
+              <div className="relative flex-1">
+                <select
+                  value={genYear}
+                  onChange={(e) => setGenYear(Number(e.target.value))}
+                  className="appearance-none input-field pr-8 cursor-pointer"
+                >
+                  {years.map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={14} />
+              </div>
             </div>
             <div className="mb-4">
               <label className="block text-xs font-medium text-text-muted mb-1">
@@ -2295,19 +2364,22 @@ export default function Invoices({ t, language }: InvoicesProps) {
                   <div className="space-y-4">
                     <div>
                       <label className="label">{t('inv.client')}</label>
-                      <select
-                        value={form.clientId}
-                        onChange={(e) => handleClientSelect(e.target.value)}
-                        className="input-field"
-                        style={clientError ? { border: '1px solid #c0392b' } : undefined}
-                      >
-                        <option value="">— seleziona cliente —</option>
-                        {clients.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            [{c.id}] {clientDisplayName(c)}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="relative">
+                        <select
+                          value={form.clientId}
+                          onChange={(e) => handleClientSelect(e.target.value)}
+                          className="appearance-none input-field pr-8 cursor-pointer"
+                          style={clientError ? { border: '1px solid #c0392b' } : undefined}
+                        >
+                          <option value="">— izberite stranko —</option>
+                          {clients.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              [{c.id}] {clientDisplayName(c)}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={14} />
+                      </div>
                       {clientError && (
                         <p className="mt-1 text-xs text-danger">{t('inv.client_required')}</p>
                       )}
@@ -2340,19 +2412,22 @@ export default function Invoices({ t, language }: InvoicesProps) {
                     </div>
                     <div>
                       <label className="label">{t('inv.vehicle')}</label>
-                      <select
-                        value={form.vehicleId}
-                        onChange={(e) => handleVehicleSelect(e.target.value)}
-                        className="input-field"
-                        disabled={!form.clientId}
-                      >
-                        <option value="">— seleziona veicolo —</option>
-                        {filteredVehicles.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.registration_number} {v.vehicle_name ? `— ${v.vehicle_name}` : ''}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="relative">
+                        <select
+                          value={form.vehicleId}
+                          onChange={(e) => handleVehicleSelect(e.target.value)}
+                          className="appearance-none input-field pr-8 cursor-pointer disabled:cursor-not-allowed"
+                          disabled={!form.clientId}
+                        >
+                          <option value="">— izberite vozilo —</option>
+                          {filteredVehicles.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.registration_number} {v.vehicle_name ? `— ${v.vehicle_name}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={14} />
+                      </div>
                     </div>
                     {/* RC badge */}
                     <div className="flex items-center gap-2">

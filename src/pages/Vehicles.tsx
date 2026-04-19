@@ -1224,57 +1224,69 @@ export default function Vehicles({ t }: VehiclesProps) {
           </div>
 
           {/* Status */}
-          <select
-            className="input-field !py-1.5 !px-2 text-xs w-auto"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="all">{t('vehicles.filter_all')}</option>
-            <option value="active">{t('vehicles.filter_active')}</option>
-            <option value="maintenance">{t('vehicles.filter_maintenance')}</option>
-            <option value="returning">{t('vehicles.filter_returning')}</option>
-          </select>
+          <div className="relative inline-flex">
+            <select
+              className="appearance-none bg-white border border-accent-muted rounded-lg pl-3 pr-7 py-1.5 text-xs text-text-dark focus:outline-none focus:border-primary cursor-pointer hover:border-primary transition-colors"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="all">{t('vehicles.filter_all')}</option>
+              <option value="active">{t('vehicles.filter_active')}</option>
+              <option value="maintenance">{t('vehicles.filter_maintenance')}</option>
+              <option value="returning">{t('vehicles.filter_returning')}</option>
+            </select>
+            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={12} />
+          </div>
 
           {/* Insurance company */}
           {distinctInsurance.length > 0 && (
-            <select
-              className="input-field !py-1.5 !px-2 text-xs w-auto"
-              value={insuranceFilter}
-              onChange={(e) => setInsuranceFilter(e.target.value)}
-            >
-              <option value="">{t('veh.insurance_section')}: {t('vehicles.filter_all')}</option>
-              {distinctInsurance.map(ins => (
-                <option key={ins} value={ins}>{ins}</option>
-              ))}
-            </select>
+            <div className="relative inline-flex">
+              <select
+                className="appearance-none bg-white border border-accent-muted rounded-lg pl-3 pr-7 py-1.5 text-xs text-text-dark focus:outline-none focus:border-primary cursor-pointer hover:border-primary transition-colors"
+                value={insuranceFilter}
+                onChange={(e) => setInsuranceFilter(e.target.value)}
+              >
+                <option value="">{t('veh.insurance_section')}: {t('vehicles.filter_all')}</option>
+                {distinctInsurance.map(ins => (
+                  <option key={ins} value={ins}>{ins}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={12} />
+            </div>
           )}
 
           {/* Leasing company */}
           {distinctLeasing.length > 0 && (
-            <select
-              className="input-field !py-1.5 !px-2 text-xs w-auto"
-              value={leasingFilter}
-              onChange={(e) => setLeasingFilter(e.target.value)}
-            >
-              <option value="">{t('veh.section_leasing')}: {t('vehicles.filter_all')}</option>
-              {distinctLeasing.map(l => (
-                <option key={l} value={l}>{l}</option>
-              ))}
-            </select>
+            <div className="relative inline-flex">
+              <select
+                className="appearance-none bg-white border border-accent-muted rounded-lg pl-3 pr-7 py-1.5 text-xs text-text-dark focus:outline-none focus:border-primary cursor-pointer hover:border-primary transition-colors"
+                value={leasingFilter}
+                onChange={(e) => setLeasingFilter(e.target.value)}
+              >
+                <option value="">{t('veh.section_leasing')}: {t('vehicles.filter_all')}</option>
+                {distinctLeasing.map(l => (
+                  <option key={l} value={l}>{l}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={12} />
+            </div>
           )}
 
           {/* Country */}
           {distinctCountries.length > 0 && (
-            <select
-              className="input-field !py-1.5 !px-2 text-xs w-auto"
-              value={countryFilter}
-              onChange={(e) => setCountryFilter(e.target.value)}
-            >
-              <option value="">{t('veh.vehicle_country')}: {t('vehicles.filter_all')}</option>
-              {distinctCountries.map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+            <div className="relative inline-flex">
+              <select
+                className="appearance-none bg-white border border-accent-muted rounded-lg pl-3 pr-7 py-1.5 text-xs text-text-dark focus:outline-none focus:border-primary cursor-pointer hover:border-primary transition-colors"
+                value={countryFilter}
+                onChange={(e) => setCountryFilter(e.target.value)}
+              >
+                <option value="">{t('veh.vehicle_country')}: {t('vehicles.filter_all')}</option>
+                {distinctCountries.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={12} />
+            </div>
           )}
 
           {/* Reset */}
