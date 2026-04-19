@@ -285,6 +285,7 @@ function CodeInput({ value, onChange, onCodeSelect, codes }: {
 }) {
   const [showDropdown, setShowDropdown] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
 
   const filtered = value.length > 0
@@ -302,7 +303,10 @@ function CodeInput({ value, onChange, onCodeSelect, codes }: {
   }
 
   useEffect(() => {
-    function handleScroll() { setShowDropdown(false); }
+    function handleScroll(e: Event) {
+      if (dropdownRef.current && dropdownRef.current.contains(e.target as Node)) return;
+      setShowDropdown(false);
+    }
     window.addEventListener('scroll', handleScroll, true);
     return () => window.removeEventListener('scroll', handleScroll, true);
   }, []);
@@ -326,7 +330,7 @@ function CodeInput({ value, onChange, onCodeSelect, codes }: {
         }}
       />
       {showDropdown && filtered.length > 0 && (
-        <div style={{
+        <div ref={dropdownRef} style={{
           position: 'fixed',
           top: dropdownPos.top,
           left: dropdownPos.left,
