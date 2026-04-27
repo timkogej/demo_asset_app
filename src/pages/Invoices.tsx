@@ -108,8 +108,6 @@ interface ManualForm {
   servicePeriod: string;
   clientId: string;
   vehicleId: string;
-  contractRefIt: string;
-  contractRefSl: string;
   isReverseCharge: boolean;
   viesStatus: 'idle' | 'checking' | 'valid' | 'invalid' | 'not_applicable';
   dueDate: string;
@@ -127,8 +125,6 @@ const BLANK_FORM: ManualForm = {
   servicePeriod: '',
   clientId: '',
   vehicleId: '',
-  contractRefIt: '',
-  contractRefSl: '',
   isReverseCharge: false,
   viesStatus: 'idle',
   dueDate: '',
@@ -971,8 +967,6 @@ export default function Invoices({ t, language }: InvoicesProps) {
         invoiceNumber: '',
         invoiceDate: today,
         dueDate,
-        contractRefIt: settings?.contract_ref_it || '',
-        contractRefSl: settings?.contract_ref_sl || '',
         servicePeriod: getItalianMonth(new Date().getMonth(), currentYear),
         items: [],
       });
@@ -1091,13 +1085,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
     const items = await loadTemplateForType(
       form.invoiceType, vehicle, client, form.servicePeriod, form.invoiceDate
     );
-    const settings = await getSettings();
-    const contractDate = vehicle.lease_start_date
-      ? (() => { const d = new Date(vehicle.lease_start_date!); return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`; })()
-      : '';
-    const contractRefIt = `${settings?.contract_ref_it || 'Riferimento contratto del'} ${contractDate}`.trim();
-    const contractRefSl = `${settings?.contract_ref_sl || 'Opravljene storitve po pogodbi z dne'} ${contractDate}`.trim();
-    setForm((f) => ({ ...f, vehicleId, items, contractRefIt, contractRefSl }));
+    setForm((f) => ({ ...f, vehicleId, items }));
   }
 
   async function handleTypeChange(type: InvoiceType) {
@@ -1130,7 +1118,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
       const vehicle = vehicles.find((v) => v.id === form.vehicleId) || null;
       const fakeInvoice: InvoiceRecord = {
         id: 'preview',
-        invoice_number: form.invoiceNumber,
+        invoice_number: form.invoiceNumber || (invoiceNumReserved ? reservedInvoiceNum : peekedInvoiceNum) || 'BOZZA',
         invoice_year: currentYear,
         invoice_sequence: 0,
         invoice_type: form.invoiceType,
@@ -1141,8 +1129,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         service_period: form.servicePeriod,
         due_date: form.dueDate,
         contract_ref_date: null,
-        contract_ref_it: form.contractRefIt,
-        contract_ref_sl: form.contractRefSl,
+        contract_ref_it: null,
+        contract_ref_sl: null,
         subtotal: formTotals.subtotal,
         vat_rate: settings?.vat_rate ?? 22,
         vat_amount: formTotals.vatAmount,
@@ -1199,8 +1187,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         invoice_date: form.invoiceDate,
         service_period: form.servicePeriod,
         due_date: form.dueDate,
-        contract_ref_it: form.contractRefIt,
-        contract_ref_sl: form.contractRefSl,
+        contract_ref_it: null,
+        contract_ref_sl: null,
         subtotal: formTotals.subtotal,
         vat_rate: settings?.vat_rate ?? 22,
         vat_amount: formTotals.vatAmount,
@@ -1279,8 +1267,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         invoice_date: form.invoiceDate,
         service_period: form.servicePeriod,
         due_date: form.dueDate,
-        contract_ref_it: form.contractRefIt,
-        contract_ref_sl: form.contractRefSl,
+        contract_ref_it: null,
+        contract_ref_sl: null,
         subtotal: formTotals.subtotal,
         vat_rate: settings?.vat_rate ?? 22,
         vat_amount: formTotals.vatAmount,
@@ -1358,8 +1346,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         invoice_date: form.invoiceDate,
         service_period: form.servicePeriod,
         due_date: form.dueDate,
-        contract_ref_it: form.contractRefIt,
-        contract_ref_sl: form.contractRefSl,
+        contract_ref_it: null,
+        contract_ref_sl: null,
         subtotal: formTotals.subtotal,
         vat_rate: settings?.vat_rate ?? 22,
         vat_amount: formTotals.vatAmount,
@@ -1460,8 +1448,6 @@ export default function Invoices({ t, language }: InvoicesProps) {
         servicePeriod: full.service_period || '',
         clientId: full.client_id || '',
         vehicleId: full.vehicle_id || '',
-        contractRefIt: full.contract_ref_it || '',
-        contractRefSl: full.contract_ref_sl || '',
         isReverseCharge: full.is_reverse_charge,
         viesStatus: 'idle',
         dueDate: full.due_date || '',
@@ -1510,8 +1496,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         invoice_date:     form.invoiceDate,
         service_period:   form.servicePeriod,
         due_date:         form.dueDate,
-        contract_ref_it:  form.contractRefIt,
-        contract_ref_sl:  form.contractRefSl,
+        contract_ref_it:  null,
+        contract_ref_sl:  null,
         is_reverse_charge: form.isReverseCharge,
         subtotal:         formTotals.subtotal,
         vat_rate:         settings?.vat_rate ?? 22,
@@ -1558,8 +1544,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         invoice_date: form.invoiceDate,
         service_period: form.servicePeriod,
         due_date: form.dueDate,
-        contract_ref_it: form.contractRefIt,
-        contract_ref_sl: form.contractRefSl,
+        contract_ref_it: null,
+        contract_ref_sl: null,
         is_reverse_charge: form.isReverseCharge,
         subtotal: formTotals.subtotal,
         vat_rate: settings?.vat_rate ?? 22,
@@ -2395,17 +2381,17 @@ export default function Invoices({ t, language }: InvoicesProps) {
                           {form.viesStatus === 'valid' && (
                             <>
                               <CheckCircle size={13} strokeWidth={1.8} className="text-green-600" />
-                              <span className="text-green-600">VIES valido → Reverse Charge</span>
+                              <span className="text-green-600">{t('inv.vies_valid_rc')}</span>
                             </>
                           )}
                           {form.viesStatus === 'invalid' && (
                             <>
                               <AlertTriangle size={13} strokeWidth={1.8} className="text-amber-600" />
-                              <span className="text-amber-600">VIES non valido → IVA 22%</span>
+                              <span className="text-amber-600">{t('inv.vies_invalid_vat')}</span>
                             </>
                           )}
                           {form.viesStatus === 'not_applicable' && (
-                            <span className="text-text-muted">Cliente nazionale → IVA 22%</span>
+                            <span className="text-text-muted">{t('inv.vies_domestic')}</span>
                           )}
                         </div>
                       )}
@@ -2441,7 +2427,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
                         </span>
                       )}
                       {form.isReverseCharge && (
-                        <span className="text-xs text-text-muted">Cliente estero + soggetto IVA + VIES valido</span>
+                        <span className="text-xs text-text-muted">{t('inv.vies_reason_valid')}</span>
                       )}
                     </div>
                     <div>
@@ -2491,14 +2477,14 @@ export default function Invoices({ t, language }: InvoicesProps) {
                       <thead>
                         <tr className="border-b border-accent-soft">
                           <th className="text-left py-2 pr-2 text-xs font-medium text-text-muted w-6">#</th>
-                          <th className="text-left py-2 pr-2 text-xs font-medium text-text-muted w-20" title="Koda bo kasneje povezana s Supabase tabelo / Il codice sarà collegato in seguito">
-                            Koda / Codice
+                          <th className="text-left py-2 pr-2 text-xs font-medium text-text-muted w-20">
+                            {t('inv.col_code')}
                           </th>
-                          <th className="text-left py-2 pr-2 text-xs font-medium text-text-muted">{t('inv.description')}</th>
-                          <th className="text-center py-2 pr-2 text-xs font-medium text-text-muted w-16">{t('inv.quantity')}</th>
-                          <th className="text-right py-2 pr-2 text-xs font-medium text-text-muted w-24">{t('inv.unit_price')}</th>
-                          <th className="text-right py-2 pr-2 text-xs font-medium text-text-muted w-24">{t('inv.item_total')}</th>
-                          <th className="text-center py-2 pr-2 text-xs font-medium text-text-muted w-20">Tipo</th>
+                          <th className="text-left py-2 pr-2 text-xs font-medium text-text-muted">{t('inv.col_desc')}</th>
+                          <th className="text-center py-2 pr-2 text-xs font-medium text-text-muted w-16">{t('inv.col_qty')}</th>
+                          <th className="text-right py-2 pr-2 text-xs font-medium text-text-muted w-24">{t('inv.col_price')}</th>
+                          <th className="text-right py-2 pr-2 text-xs font-medium text-text-muted w-24">{t('inv.col_total')}</th>
+                          <th className="text-center py-2 pr-2 text-xs font-medium text-text-muted w-20">{t('inv.col_type')}</th>
                           <th className="text-center py-2 pr-2 text-xs font-medium text-text-muted w-8" title="Mostra traduzione / Pokazi prevod">TR</th>
                           <th className="w-8" />
                         </tr>
@@ -2528,7 +2514,14 @@ export default function Invoices({ t, language }: InvoicesProps) {
                                 value={item.description}
                                 onChange={(e) => setForm((f) => ({
                                   ...f,
-                                  items: f.items.map((i) => i.id === item.id ? { ...i, description: e.target.value } : i),
+                                  items: f.items.map((i) => {
+                                    if (i.id !== item.id) return i;
+                                    const newDesc = e.target.value;
+                                    if (i.code && i.description !== newDesc) {
+                                      return { ...i, description: newDesc, code: '' };
+                                    }
+                                    return { ...i, description: newDesc };
+                                  }),
                                 }))}
                                 rows={1}
                                 className="input-field py-1 text-sm w-full resize-none"
@@ -2566,18 +2559,44 @@ export default function Invoices({ t, language }: InvoicesProps) {
                               {item.line_type === 'item' ? `€ ${formatCurrency(item.quantity * item.unit_price)}` : '—'}
                             </td>
                             <td className="py-1.5 pr-2">
-                              <select
-                                value={item.line_type}
-                                onChange={(e) => setForm((f) => ({
-                                  ...f,
-                                  items: f.items.map((i) => i.id === item.id ? { ...i, line_type: e.target.value as FormItem['line_type'] } : i),
-                                }))}
-                                className="input-field py-1 text-xs"
-                              >
-                                <option value="item">Item</option>
-                                <option value="text">Testo</option>
-                                <option value="space">Spazio</option>
-                              </select>
+                              <div style={{ position: 'relative', minWidth: '90px' }}>
+                                <select
+                                  value={item.line_type}
+                                  onChange={(e) => setForm((f) => ({
+                                    ...f,
+                                    items: f.items.map((i) => i.id === item.id ? { ...i, line_type: e.target.value as FormItem['line_type'] } : i),
+                                  }))}
+                                  style={{
+                                    appearance: 'none',
+                                    WebkitAppearance: 'none',
+                                    width: '100%',
+                                    padding: '4px 28px 4px 10px',
+                                    border: '1px solid #a8d4b3',
+                                    borderRadius: '6px',
+                                    fontSize: '12px',
+                                    color: '#1c2b22',
+                                    background: 'white',
+                                    cursor: 'pointer',
+                                    outline: 'none',
+                                  }}
+                                >
+                                  <option value="item">{t('settings.line_type_item')}</option>
+                                  <option value="text">{t('settings.line_type_text')}</option>
+                                  <option value="space">{t('settings.line_type_space')}</option>
+                                </select>
+                                <ChevronDown
+                                  size={12}
+                                  strokeWidth={1.5}
+                                  style={{
+                                    position: 'absolute',
+                                    right: '8px',
+                                    top: '50%',
+                                    transform: 'translateY(-50%)',
+                                    pointerEvents: 'none',
+                                    color: '#6b8f75',
+                                  }}
+                                />
+                              </div>
                             </td>
                             <td className="py-1.5 pr-2 text-center">
                               {(item.line_type === 'item' || item.line_type === 'text') && (
@@ -2767,7 +2786,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
               <div>
                 {formStep > 1 && (
                   <button onClick={() => setFormStep((s) => s - 1)} className="btn-secondary text-sm">
-                    ← Indietro
+                    {t('btn.back')}
                   </button>
                 )}
               </div>
@@ -2777,7 +2796,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
                     onClick={() => formStep === 2 ? goToStep3() : handleNextStep1()}
                     className="btn-primary text-sm"
                   >
-                    Avanti →
+                    {t('btn.next')}
                   </button>
                 )}
                 {formStep === 3 && !editMode && (
@@ -2788,7 +2807,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
                       className="btn-secondary text-sm"
                       style={{ background: '#f3f4f6', color: '#374151' }}
                     >
-                      {savingDraft ? t('common.loading') : '💾 Shrani osnutek / Salva bozza'}
+                      {savingDraft ? t('common.loading') : `💾 ${t('inv.save_draft')}`}
                     </button>
                     <button
                       onClick={handleSaveConfirmed}
@@ -2796,14 +2815,14 @@ export default function Invoices({ t, language }: InvoicesProps) {
                       className="btn-secondary text-sm"
                       style={{ background: 'var(--color-accent-soft)', color: 'var(--color-primary)', border: '1px solid var(--color-accent)' }}
                     >
-                      {savingDraft ? t('common.loading') : '✓ Potrdi / Conferma'}
+                      {savingDraft ? t('common.loading') : `✓ ${t('inv.save_confirmed')}`}
                     </button>
                     <button
                       onClick={handleSaveAndSend}
                       disabled={savingDraft}
                       className="btn-primary text-sm"
                     >
-                      {savingDraft ? t('common.loading') : '✓ Potrdi in pošlji / Conferma e invia'}
+                      {savingDraft ? t('common.loading') : `✓ ${t('inv.save_and_send')}`}
                     </button>
                   </>
                 )}
@@ -2813,7 +2832,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
                     disabled={savingDraft}
                     className="btn-primary text-sm"
                   >
-                    {savingDraft ? t('common.loading') : '💾 Shrani spremembe / Salva modifiche'}
+                    {savingDraft ? t('common.loading') : `💾 ${t('inv.save_changes')}`}
                   </button>
                 )}
               </div>

@@ -132,7 +132,7 @@ function VariableAutocomplete({
   );
 }
 
-export default function Settings({ t }: SettingsProps) {
+export default function Settings({ t, language }: SettingsProps) {
   const [openSection, setOpenSection] = useState<SectionKey>('company');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -143,6 +143,7 @@ export default function Settings({ t }: SettingsProps) {
   const [logoVarentUploading, setLogoVarentUploading] = useState(false);
   const [testingWebhook, setTestingWebhook] = useState(false);
   const [showDeeplKey, setShowDeeplKey] = useState(false);
+  const [showTechnicalSettings, setShowTechnicalSettings] = useState(false);
 
   // Template state
   const [templates, setTemplates] = useState<InvoiceTemplate[]>([]);
@@ -169,8 +170,6 @@ export default function Settings({ t }: SettingsProps) {
     invoice_current_year: new Date().getFullYear(),
     invoice_start_number: 1,
     vat_rate: 22,
-    contract_ref_it: '',
-    contract_ref_sl: '',
     payment_due_days: 14,
     n8n_webhook_url: '',
     n8n_monthly_webhook_url: '',
@@ -824,25 +823,6 @@ export default function Settings({ t }: SettingsProps) {
                 La scadenza viene calcolata automaticamente / Rok se izračuna avtomatično
               </p>
 
-              {/* Contract refs */}
-              <div>
-                <FieldLabel text={t('settings.contract_ref_it')} />
-                <input
-                  className="input-field w-full"
-                  value={form.contract_ref_it ?? ''}
-                  onChange={(e) => handleChange('contract_ref_it', e.target.value)}
-                  placeholder="Riferimento contratto del"
-                />
-              </div>
-              <div>
-                <FieldLabel text={t('settings.contract_ref_sl')} />
-                <input
-                  className="input-field w-full"
-                  value={form.contract_ref_sl ?? ''}
-                  onChange={(e) => handleChange('contract_ref_sl', e.target.value)}
-                  placeholder="Opravljiene storitve po pogodbi z dne"
-                />
-              </div>
             </div>
           )}
         </div>
@@ -856,68 +836,6 @@ export default function Settings({ t }: SettingsProps) {
           />
           {openSection === 'email' && (
             <div className="px-5 pb-6 space-y-5 border-t border-accent-soft pt-4">
-              {/* Webhook */}
-              <div>
-                <FieldLabel text={t('settings.n8n_webhook')} />
-                <input
-                  type="url"
-                  className="input-field w-full"
-                  value={form.n8n_webhook_url ?? ''}
-                  onChange={(e) => handleChange('n8n_webhook_url', e.target.value)}
-                  placeholder="https://n8n.example.com/webhook/..."
-                />
-                <div
-                  className="mt-2 p-3 rounded-10 text-xs text-text-muted"
-                  style={{ background: '#f8faf8', border: '1px solid #e8f0eb' }}
-                >
-                  Questo URL viene chiamato quando si invia una fattura / Ta URL se pokliče ob pošiljanju računa
-                </div>
-                <button
-                  type="button"
-                  onClick={handleTestWebhook}
-                  disabled={testingWebhook || !form.n8n_webhook_url}
-                  className="btn-secondary text-xs mt-2"
-                >
-                  {testingWebhook ? t('common.loading') : 'Testa webhook / Testiraj webhook'}
-                </button>
-              </div>
-
-              {/* Monthly generation webhook */}
-              <div>
-                <FieldLabel text={t('settings.n8n_monthly_webhook')} />
-                <input
-                  type="url"
-                  className="input-field w-full"
-                  value={form.n8n_monthly_webhook_url ?? ''}
-                  onChange={(e) => handleChange('n8n_monthly_webhook_url', e.target.value)}
-                  placeholder="https://tikej.app.n8n.cloud/webhook/generate-monthly-invoices"
-                />
-                <div
-                  className="mt-2 p-3 rounded-10 text-xs text-text-muted"
-                  style={{ background: '#f8faf8', border: '1px solid #e8f0eb' }}
-                >
-                  Questo URL viene chiamato per generare le fatture mensili / Ta URL se pokliče za generiranje mesečnih računov
-                </div>
-              </div>
-
-              {/* VIES webhook */}
-              <div>
-                <FieldLabel text="VIES Webhook URL" />
-                <input
-                  type="url"
-                  className="input-field w-full"
-                  value={form.vies_webhook_url ?? ''}
-                  onChange={(e) => handleChange('vies_webhook_url', e.target.value)}
-                  placeholder="https://tikej.app.n8n.cloud/webhook/vies-check"
-                />
-                <div
-                  className="mt-2 p-3 rounded-10 text-xs text-text-muted"
-                  style={{ background: '#f8faf8', border: '1px solid #e8f0eb' }}
-                >
-                  URL del webhook n8n per la verifica VIES / URL n8n webhookа za preverjanje VIES
-                </div>
-              </div>
-
               {/* CC email */}
               <div>
                 <FieldLabel text={t('settings.cc_email')} />
@@ -929,45 +847,6 @@ export default function Settings({ t }: SettingsProps) {
                 />
                 <p className="text-xs text-text-muted mt-1">
                   Ogni fattura inviata verrà copiata a questo indirizzo / Vsak poslan račun bo kopiran na ta naslov
-                </p>
-              </div>
-
-              {/* DeepL API Key */}
-              <div>
-                <FieldLabel text={t('settings.deepl_api_key')} />
-                <div className="relative">
-                  <input
-                    type={showDeeplKey ? 'text' : 'password'}
-                    className="input-field w-full pr-16"
-                    value={form.deepl_api_key ?? ''}
-                    onChange={(e) => handleChange('deepl_api_key', e.target.value)}
-                    placeholder="••••••••••••••••"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowDeeplKey((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-text-muted hover:text-primary"
-                  >
-                    {showDeeplKey ? 'Nascondi' : 'Mostra'}
-                  </button>
-                </div>
-                <p className="text-xs text-text-muted mt-1">
-                  Utilizzato per tradurre automaticamente le descrizioni nelle fatture / Uporablja se za samodejni prevod opisov na racunih
-                </p>
-              </div>
-
-              {/* DeepL Webhook URL */}
-              <div>
-                <FieldLabel text="DeepL Webhook URL (n8n)" />
-                <input
-                  type="text"
-                  className="input-field w-full"
-                  value={form.deepl_webhook_url ?? ''}
-                  onChange={(e) => handleChange('deepl_webhook_url', e.target.value)}
-                  placeholder="https://tikej.app.n8n.cloud/webhook/deepl-translate"
-                />
-                <p className="text-xs text-text-muted mt-1">
-                  URL n8n webhook za DeepL prevod opisov v fakturah / URL n8n webhook za DeepL prevod opisov v racunih
                 </p>
               </div>
 
@@ -1032,6 +911,107 @@ export default function Settings({ t }: SettingsProps) {
                   value={form.email_body_sl ?? ''}
                   onChange={(e) => handleChange('email_body_sl', e.target.value)}
                 />
+              </div>
+
+              {/* Technical settings — collapsed by default */}
+              <div
+                className="rounded-10 overflow-hidden"
+                style={{ border: '1px solid #e8f0eb' }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setShowTechnicalSettings((v) => !v)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-xs font-semibold text-text-muted hover:bg-accent-soft transition-colors"
+                >
+                  <span>
+                    {language === 'sl' ? 'Tehnične nastavitve' : 'Impostazioni tecniche'}
+                  </span>
+                  {showTechnicalSettings ? (
+                    <ChevronUp size={14} strokeWidth={1.8} />
+                  ) : (
+                    <ChevronDown size={14} strokeWidth={1.8} />
+                  )}
+                </button>
+                {showTechnicalSettings && (
+                  <div className="px-4 pb-4 pt-2 space-y-4 border-t border-accent-soft">
+                    {/* N8N Webhook */}
+                    <div>
+                      <FieldLabel text={t('settings.n8n_webhook')} />
+                      <input
+                        type="url"
+                        className="input-field w-full"
+                        value={form.n8n_webhook_url ?? ''}
+                        onChange={(e) => handleChange('n8n_webhook_url', e.target.value)}
+                        placeholder="https://n8n.example.com/webhook/..."
+                      />
+                      <button
+                        type="button"
+                        onClick={handleTestWebhook}
+                        disabled={testingWebhook || !form.n8n_webhook_url}
+                        className="btn-secondary text-xs mt-2"
+                      >
+                        {testingWebhook ? t('common.loading') : 'Testa webhook / Testiraj webhook'}
+                      </button>
+                    </div>
+
+                    {/* Monthly generation webhook */}
+                    <div>
+                      <FieldLabel text={t('settings.n8n_monthly_webhook')} />
+                      <input
+                        type="url"
+                        className="input-field w-full"
+                        value={form.n8n_monthly_webhook_url ?? ''}
+                        onChange={(e) => handleChange('n8n_monthly_webhook_url', e.target.value)}
+                        placeholder="https://tikej.app.n8n.cloud/webhook/generate-monthly-invoices"
+                      />
+                    </div>
+
+                    {/* VIES webhook */}
+                    <div>
+                      <FieldLabel text="VIES Webhook URL" />
+                      <input
+                        type="url"
+                        className="input-field w-full"
+                        value={form.vies_webhook_url ?? ''}
+                        onChange={(e) => handleChange('vies_webhook_url', e.target.value)}
+                        placeholder="https://tikej.app.n8n.cloud/webhook/vies-check"
+                      />
+                    </div>
+
+                    {/* DeepL API Key */}
+                    <div>
+                      <FieldLabel text={t('settings.deepl_api_key')} />
+                      <div className="relative">
+                        <input
+                          type={showDeeplKey ? 'text' : 'password'}
+                          className="input-field w-full pr-16"
+                          value={form.deepl_api_key ?? ''}
+                          onChange={(e) => handleChange('deepl_api_key', e.target.value)}
+                          placeholder="••••••••••••••••"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowDeeplKey((v) => !v)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-text-muted hover:text-primary"
+                        >
+                          {showDeeplKey ? 'Nascondi' : 'Mostra'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* DeepL Webhook URL */}
+                    <div>
+                      <FieldLabel text="DeepL Webhook URL (n8n)" />
+                      <input
+                        type="text"
+                        className="input-field w-full"
+                        value={form.deepl_webhook_url ?? ''}
+                        onChange={(e) => handleChange('deepl_webhook_url', e.target.value)}
+                        placeholder="https://tikej.app.n8n.cloud/webhook/deepl-translate"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -14,21 +14,26 @@ import {
 } from './invoiceTranslator';
 
 // ─── TEXT SANITIZER ──────────────────────────────────────────────────────────
-// All text passed to doc.text() must go through sanitize() — jsPDF cannot
+// All text passed to doc.text() must go through deepSanitize() — jsPDF cannot
 // render accented/diacritic characters with the built-in helvetica font.
-function sanitize(text: string | null | undefined): string {
-  return (text || '')
-    .replace(/š/g, 's').replace(/Š/g, 'S')
-    .replace(/č/g, 'c').replace(/Č/g, 'C')
-    .replace(/ž/g, 'z').replace(/Ž/g, 'Z')
-    .replace(/đ/g, 'd').replace(/Đ/g, 'D')
-    .replace(/ć/g, 'c').replace(/Ć/g, 'C')
-    .replace(/á/g, 'a').replace(/é/g, 'e')
-    .replace(/í/g, 'i').replace(/ó/g, 'o')
-    .replace(/ú/g, 'u').replace(/ñ/g, 'n')
-    .replace(/à/g, 'a').replace(/è/g, 'e')
-    .replace(/ì/g, 'i').replace(/ò/g, 'o')
-    .replace(/ù/g, 'u');
+// Also strips zero-width spaces and other invisible chars that cause spaced-out rendering.
+function deepSanitize(text: string | null | undefined): string {
+  if (!text) return '';
+  return text
+    .replace(/[​‌‍﻿­]/g, '')
+    .replace(/ /g, ' ')
+    .replace(/[^\x00-\x7F]/g, (c) => {
+      const map: Record<string, string> = {
+        'š': 's', 'č': 'c', 'ž': 'z', 'Š': 'S', 'Č': 'C', 'Ž': 'Z',
+        'đ': 'd', 'Đ': 'D', 'ć': 'c', 'Ć': 'C',
+        'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
+        'à': 'a', 'è': 'e', 'ì': 'i', 'ò': 'o', 'ù': 'u',
+        'ä': 'a', 'ë': 'e', 'ï': 'i', 'ö': 'o', 'ü': 'u',
+        'ñ': 'n',
+        '‘': "'", '’': "'", '“': '"', '”': '"',
+      };
+      return map[c] !== undefined ? map[c] : '';
+    });
 }
 
 // ─── HELPER FUNCTIONS ────────────────────────────────────────────────────────
@@ -119,14 +124,14 @@ export async function generateInvoicePDF(
 
   // Helper: bilingual label (SL primary, secondary after "/" — or just SL if no secondary)
   const bi = (slText: string): string => {
-    if (!secondaryLang) return sanitize(slText);
+    if (!secondaryLang) return deepSanitize(slText);
     const combined = biLabel(slText, secondaryLang);
-    if (combined !== slText) return sanitize(combined);
+    if (combined !== slText) return deepSanitize(combined);
     if (secondaryLang === 'IT') {
       const normalized = normalizeSLtoIT(slText);
-      if (normalized !== slText) return sanitize(`${slText} / ${normalized}`);
+      if (normalized !== slText) return deepSanitize(`${slText} / ${normalized}`);
     }
-    return sanitize(slText);
+    return deepSanitize(slText);
   };
 
   // input_language tells us what language the item descriptions are stored in
@@ -138,15 +143,15 @@ export async function generateInvoicePDF(
     itemCode?: string | null,
     lang: 'IT' | 'SL' = 'IT'
   ): Promise<{ primary: string; secondary: string | null }> => {
-    if (!description) return { primary: '', secondary: null };
+    if (!description || !description.trim()) return { primary: '', secondary: null };
 
     if (itemCode && invoiceCodes) {
       const codeRecord = invoiceCodes.find(c => c.code === itemCode);
       if (codeRecord) {
-        const primary = sanitize(codeRecord.description_sl || codeRecord.description_it);
+        const primary = deepSanitize(codeRecord.description_sl || codeRecord.description_it);
         let secondary: string | null = null;
-        if (secondaryLang === 'IT') secondary = sanitize(codeRecord.description_it);
-        else if (secondaryLang === 'EN') secondary = sanitize(codeRecord.description_en || codeRecord.description_it);
+        if (secondaryLang === 'IT') secondary = deepSanitize(codeRecord.description_it);
+        else if (secondaryLang === 'EN') secondary = deepSanitize(codeRecord.description_en || codeRecord.description_it);
         return { primary, secondary: secondary !== primary ? secondary : null };
       }
     }
@@ -166,7 +171,7 @@ export async function generateInvoicePDF(
     }
 
     if (!secondaryLang) {
-      return { primary: sanitize(slText), secondary: null };
+      return { primary: deepSanitize(slText), secondary: null };
     }
 
     let secText: string | null = null;
@@ -196,8 +201,8 @@ export async function generateInvoicePDF(
     }
 
     return {
-      primary: sanitize(slText),
-      secondary: secText && sanitize(secText) !== sanitize(slText) ? sanitize(secText) : null,
+      primary: deepSanitize(slText),
+      secondary: secText && deepSanitize(secText) !== deepSanitize(slText) ? deepSanitize(secText) : null,
     };
   };
 
@@ -228,19 +233,19 @@ export async function generateInvoicePDF(
   const companyRightEdge = marginR;
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.text(sanitize(settings.company_name || 'MANUTECNICA D.O.O.'), companyRightEdge, companyY, { align: 'right' });
+  doc.text(deepSanitize(settings.company_name || 'MANUTECNICA D.O.O.'), companyRightEdge, companyY, { align: 'right' });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
-  doc.text(sanitize(settings.company_address || 'BREZNIKOVA ULICA, 15'), companyRightEdge, companyY + 4, { align: 'right' });
+  doc.text(deepSanitize(settings.company_address || 'BREZNIKOVA ULICA, 15'), companyRightEdge, companyY + 4, { align: 'right' });
   doc.text(
-    `${sanitize(settings.company_postal || '1230')} - ${sanitize(settings.company_city || 'DOMZALE')} (${sanitize(settings.company_country || 'SI')})`,
+    `${deepSanitize(settings.company_postal || '1230')} - ${deepSanitize(settings.company_city || 'DOMZALE')} (${deepSanitize(settings.company_country || 'SI')})`,
     companyRightEdge, companyY + 8, { align: 'right' }
   );
-  doc.text(`DDV ${sanitize(settings.company_tax_number || 'SI51128551')}`, companyRightEdge, companyY + 12, { align: 'right' });
+  doc.text(`DDV ${deepSanitize(settings.company_tax_number || 'SI51128551')}`, companyRightEdge, companyY + 12, { align: 'right' });
   if (settings.company_reg_number) {
-    doc.text(`Mat. ${sanitize(settings.company_reg_number)}`, companyRightEdge, companyY + 16, { align: 'right' });
+    doc.text(`Mat. ${deepSanitize(settings.company_reg_number)}`, companyRightEdge, companyY + 16, { align: 'right' });
   }
-  doc.text(sanitize(settings.company_email || ''), companyRightEdge, companyY + 20, { align: 'right' });
+  doc.text(deepSanitize(settings.company_email || ''), companyRightEdge, companyY + 20, { align: 'right' });
 
   y = Math.max(y, companyY + 26);
 
@@ -257,7 +262,7 @@ export async function generateInvoicePDF(
     doc.text('RACUN ST.:', marginL + 2, boxY + 12);
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
-    doc.text(sanitize(invoice.invoice_number), marginL + 28, boxY + 12);
+    doc.text(deepSanitize(invoice.invoice_number), marginL + 28, boxY + 12);
     doc.setFont('helvetica', 'normal');
   } else {
     // Bilingual — SL on top, secondary below — NO "/" separator
@@ -266,7 +271,7 @@ export async function generateInvoicePDF(
     doc.text(secNumberLabel, marginL + 2, boxY + 14);
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
-    doc.text(sanitize(invoice.invoice_number), marginL + 35, boxY + 11);
+    doc.text(deepSanitize(invoice.invoice_number), marginL + 35, boxY + 11);
     doc.setFont('helvetica', 'normal');
   }
 
@@ -274,30 +279,30 @@ export async function generateInvoicePDF(
   const client = invoice.client;
   const clientLines: string[] = [];
 
-  const clientName = sanitize(
+  const clientName = deepSanitize(
     client?.company_name ||
     client?.company_name_additional ||
     ''
   );
   if (clientName) clientLines.push(clientName);
 
-  const clientNameAdd = sanitize(client?.company_name_additional || '');
+  const clientNameAdd = deepSanitize(client?.company_name_additional || '');
   if (clientNameAdd && clientNameAdd !== clientName) clientLines.push(clientNameAdd);
 
-  const address = sanitize(client?.address || '');
+  const address = deepSanitize(client?.address || '');
   if (address) clientLines.push(address);
 
-  const postalCode = sanitize(client?.postal_code || '');
-  const city = sanitize(client?.city || '');
-  const country = sanitize(client?.country || '');
+  const postalCode = deepSanitize(client?.postal_code || '');
+  const city = deepSanitize(client?.city || '');
+  const country = deepSanitize(client?.country || '');
   const cityLine = [postalCode, city, country].filter(v => v.length > 0).join(' - ');
   if (cityLine) clientLines.push(cityLine);
 
   if (client?.registration_number) {
-    clientLines.push(`C.F. ${sanitize(client.registration_number)}`);
+    clientLines.push(`C.F. ${deepSanitize(client.registration_number)}`);
   }
   if (client?.tax_number) {
-    clientLines.push(`${getTaxLabel(secondaryLang)} ${sanitize(client.tax_number)}`);
+    clientLines.push(`${getTaxLabel(secondaryLang)} ${deepSanitize(client.tax_number)}`);
   }
 
   const lineHeight = 4.5;
@@ -339,16 +344,14 @@ export async function generateInvoicePDF(
   }
 
   if (invoice.service_period) {
-    const serviceLabel = sanitize(bi('Datum opr. Storitev:'));
-    const labelStartX = 83;
+    const serviceLabel = deepSanitize(bi('Datum opr. Storitev:'));
+    const biPeriod = deepSanitize(getBilingualPeriod(invoice.service_period, secondaryLang));
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    const labelWidth = doc.getTextWidth(serviceLabel);
-    doc.text(serviceLabel, labelStartX, dateRowY + 5);
-    const biPeriod = sanitize(getBilingualPeriod(invoice.service_period, secondaryLang));
+    doc.text(serviceLabel, marginR, dateRowY + 5, { align: 'right' });
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
-    doc.text(biPeriod, labelStartX + labelWidth + 2, dateRowY + 5);
+    doc.text(biPeriod, marginR, dateRowY + 10, { align: 'right' });
     doc.setFont('helvetica', 'normal');
   }
 
@@ -373,8 +376,8 @@ export async function generateInvoicePDF(
     // Skip translation for purely numeric content
     if (isPurelyNumeric(item.description)) {
       tableBody.push([
-        { content: item.code || '' },
-        { content: sanitize(item.description), styles: { fontSize: 7.5 } },
+        { content: '' },
+        { content: deepSanitize(item.description), styles: { fontSize: 7.5 } },
         { content: item.quantity === 1 ? '1' : String(item.quantity || 0) },
         { content: item.unit_price > 0 ? `${formatCurrency(item.unit_price)} EUR` : '' },
         { content: item.total > 0 ? `${formatCurrency(item.total)} EUR` : '' },
@@ -389,7 +392,7 @@ export async function generateInvoicePDF(
       const itFallback = normalizeSLtoIT(item.description) !== item.description
         ? normalizeSLtoIT(item.description)
         : item.description;
-      desc = { ...desc, secondary: sanitize(itFallback) };
+      desc = { ...desc, secondary: deepSanitize(itFallback) };
     }
 
     const showTrans = item.show_translation !== false;
@@ -410,34 +413,13 @@ export async function generateInvoicePDF(
       ]);
     } else {
       tableBody.push([
-        { content: item.code || '' },
+        { content: '' },
         descContent,
         { content: item.quantity === 1 ? '1' : (item.quantity || 0).toString() },
         { content: item.unit_price > 0 ? `${formatCurrency(item.unit_price)} EUR` : '' },
         { content: item.total > 0 ? `${formatCurrency(item.total)} EUR` : '' },
       ]);
     }
-  }
-
-  // Contract reference row — use stored IT/SL values directly, no translation
-  if (invoice.contract_ref_sl || invoice.contract_ref_it) {
-    const contractPrimary = sanitize(invoice.contract_ref_sl || '');
-    const contractSecondary =
-      secondaryLang === 'IT' ? sanitize(invoice.contract_ref_it || '') :
-      secondaryLang === 'EN' ? sanitize(invoice.contract_ref_it || '') :
-      null;
-    tableBody.push([
-      { content: '' },
-      {
-        content: contractSecondary && contractSecondary !== contractPrimary
-          ? contractPrimary + '\n' + contractSecondary
-          : contractPrimary,
-        styles: { fontSize: 7.5 },
-      },
-      { content: '' },
-      { content: '' },
-      { content: '' },
-    ]);
   }
 
   // Reverse charge disclaimer row
@@ -545,8 +527,8 @@ export async function generateInvoicePDF(
   const payRows =
     invoice.payment_schedules && invoice.payment_schedules.length > 0
       ? [
-          ['IBAN', sanitize(settings.iban || '')],
-          ['SWIFT', sanitize(settings.swift || '')],
+          ['IBAN', deepSanitize(settings.iban || '')],
+          ['SWIFT', deepSanitize(settings.swift || '')],
           [placiloLabel, payMethodValue],
           ...invoice.payment_schedules.map((s, i) => [
             i === 0 ? rokPlacilaLabel : '',
@@ -554,8 +536,8 @@ export async function generateInvoicePDF(
           ]),
         ]
       : [
-          ['IBAN', sanitize(settings.iban || '')],
-          ['SWIFT', sanitize(settings.swift || '')],
+          ['IBAN', deepSanitize(settings.iban || '')],
+          ['SWIFT', deepSanitize(settings.swift || '')],
           [placiloLabel, payMethodValue],
           [rokPlacilaLabel, invoice.due_date ? formatDateIT(invoice.due_date) : ''],
         ];
@@ -566,13 +548,13 @@ export async function generateInvoicePDF(
     if (row[0]) {
       const labelLines = row[0].split('\n');
       labelLines.forEach((line, li) => {
-        doc.text(sanitize(line), payX, rowY + 3 + (li * 3.5));
+        doc.text(deepSanitize(line), payX, rowY + 3 + (li * 3.5));
       });
     }
     doc.rect(payX + labelW, rowY, valueW, rowH);
     const valueLines = row[1].split('\n');
     valueLines.forEach((vline, vli) => {
-      doc.text(sanitize(vline), payX + labelW + 2, rowY + 3 + (vli * 3.5));
+      doc.text(deepSanitize(vline), payX + labelW + 2, rowY + 3 + (vli * 3.5));
     });
   });
 

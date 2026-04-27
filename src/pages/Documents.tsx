@@ -8,6 +8,7 @@ import {
   Image,
   FileType,
   File,
+  ChevronDown,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase, uploadVehicleFile, deleteVehicleFile } from '../lib/supabase';
@@ -67,6 +68,130 @@ function FileIcon({ mimeType }: { mimeType: string }) {
   if (mimeType.includes('word'))
     return <FileType size={16} strokeWidth={1.8} style={{ color: '#3b82f6' }} />;
   return <File size={16} strokeWidth={1.8} style={{ color: 'var(--color-text-muted)' }} />;
+}
+
+function VehicleSearchSelect({ value, onChange, vehicles, t }: {
+  value: string;
+  onChange: (id: string) => void;
+  vehicles: Vehicle[];
+  t: (key: string) => string;
+}) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  const filtered = vehicles.filter((v) =>
+    `${v.registration_number} ${v.vehicle_name ?? ''}`.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const selected = vehicles.find((v) => v.id === value);
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', minWidth: '260px' }}>
+      <div
+        onClick={() => setOpen(!open)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '6px 12px',
+          border: '1px solid #a8d4b3',
+          borderRadius: '8px',
+          cursor: 'pointer',
+          background: 'white',
+          fontSize: '13px',
+        }}
+      >
+        <span style={{ color: selected ? '#1c2b22' : '#6b8f75' }}>
+          {selected
+            ? `${selected.registration_number}${selected.vehicle_name ? ` — ${selected.vehicle_name}` : ''}`
+            : t('doc.all_vehicles')}
+        </span>
+        <ChevronDown size={14} strokeWidth={1.5} color="#6b8f75" style={{ marginLeft: 6, flexShrink: 0 }} />
+      </div>
+
+      {open && (
+        <div style={{
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          zIndex: 9999,
+          background: 'white',
+          border: '1px solid #a8d4b3',
+          borderRadius: '8px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          minWidth: '300px',
+          maxHeight: '280px',
+          overflowY: 'auto',
+          marginTop: '4px',
+        }}>
+          <div style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('doc.search_vehicle')}
+              style={{
+                width: '100%',
+                padding: '6px 10px',
+                border: '1px solid #a8d4b3',
+                borderRadius: '6px',
+                fontSize: '12px',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div
+            onMouseDown={() => { onChange(''); setOpen(false); setSearch(''); }}
+            style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', color: '#6b8f75' }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = '#f0fdf4')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'white')}
+          >
+            {t('doc.all_vehicles')}
+          </div>
+          {filtered.map((v) => (
+            <div
+              key={v.id}
+              onMouseDown={() => { onChange(v.id); setOpen(false); setSearch(''); }}
+              style={{
+                padding: '8px 12px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                background: value === v.id ? '#f0fdf4' : 'white',
+                borderBottom: '1px solid #f8f8f8',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = '#f0fdf4')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = value === v.id ? '#f0fdf4' : 'white')}
+            >
+              <span style={{ fontWeight: '700', fontFamily: 'monospace', color: '#1a4731' }}>
+                {v.registration_number}
+              </span>
+              {v.vehicle_name && (
+                <span style={{ color: '#6b8f75', marginLeft: '8px' }}>
+                  {v.vehicle_name}
+                </span>
+              )}
+            </div>
+          ))}
+          {filtered.length === 0 && (
+            <div style={{ padding: '12px', color: '#6b8f75', fontSize: '12px', textAlign: 'center' }}>
+              {t('doc.no_vehicles_found')}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Documents({ t }: DocumentsProps) {
@@ -200,23 +325,16 @@ export default function Documents({ t }: DocumentsProps) {
       <div className="flex items-center justify-between gap-4 mb-4">
         <h1 className="page-title">{t('doc.title')}</h1>
         <div className="flex items-center gap-3 flex-shrink-0">
-          <select
+          <VehicleSearchSelect
             value={selectedVehicleId}
-            onChange={(e) => {
-              setSelectedVehicleId(e.target.value);
+            onChange={(id) => {
+              setSelectedVehicleId(id);
               setUploadOpen(false);
               setPendingFile(null);
             }}
-            className="input-field text-sm py-1.5"
-            style={{ minWidth: 200 }}
-          >
-            <option value="">{t('doc.all_vehicles')}</option>
-            {vehicles.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.registration_number}{v.vehicle_name ? ` — ${v.vehicle_name}` : ''}
-              </option>
-            ))}
-          </select>
+            vehicles={vehicles}
+            t={t}
+          />
 
           {showUploadButton && (
             <button
