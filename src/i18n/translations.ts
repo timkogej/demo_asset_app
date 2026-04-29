@@ -426,6 +426,9 @@ export const translations = {
       cancel_body: 'La fattura {number} verrà annullata.',
       cancelled: 'Fattura annullata',
       updated: 'Fattura aggiornata',
+      kpi_monthly_total: 'TOTALE MESE CORRENTE',
+      kpi_outstanding: 'DA INCASSARE',
+      kpi_collected: 'INCASSATO ({year})',
     },
     pay: {
       title: 'Pagamenti',
@@ -904,6 +907,9 @@ export const translations = {
       cancel_body: 'Račun {number} bo preklican.',
       cancelled: 'Račun preklican',
       updated: 'Račun posodobljen',
+      kpi_monthly_total: 'SKUPAJ TA MESEC',
+      kpi_outstanding: 'ZA IZTERJATI',
+      kpi_collected: 'PREJETO ({year})',
     },
     pay: {
       title: 'Plačila',

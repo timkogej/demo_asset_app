@@ -1702,7 +1702,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
       {/* ---- KPI Cards ---- */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card p-4">
-          <p className="text-xs text-text-muted font-medium uppercase tracking-wider mb-1">Totale mese corrente</p>
+          <p className="text-xs text-text-muted font-medium uppercase tracking-wider mb-1">{t('inv.kpi_monthly_total')}</p>
           {loading ? (
             <div className="h-8 w-24 bg-gray-100 rounded animate-pulse" />
           ) : (
@@ -1710,7 +1710,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
           )}
         </div>
         <div className="card p-4">
-          <p className="text-xs text-text-muted font-medium uppercase tracking-wider mb-1">Da incassare</p>
+          <p className="text-xs text-text-muted font-medium uppercase tracking-wider mb-1">{t('inv.kpi_outstanding')}</p>
           {loading ? (
             <div className="h-8 w-24 bg-gray-100 rounded animate-pulse" />
           ) : (
@@ -1718,7 +1718,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
           )}
         </div>
         <div className="card p-4">
-          <p className="text-xs text-text-muted font-medium uppercase tracking-wider mb-1">Incassato ({currentYear})</p>
+          <p className="text-xs text-text-muted font-medium uppercase tracking-wider mb-1">{t('inv.kpi_collected').replace('{year}', String(currentYear))}</p>
           {loading ? (
             <div className="h-8 w-24 bg-gray-100 rounded animate-pulse" />
           ) : (

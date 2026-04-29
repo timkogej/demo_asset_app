@@ -200,12 +200,12 @@ export default function Payments({ t }: PaymentsProps) {
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums">
                         {diff === 0 ? (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-accent-soft text-primary">
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-accent-soft text-primary whitespace-nowrap inline-block">
                             {t('pay.full')}
                           </span>
                         ) : diff > 0 ? (
                           <div className="flex flex-col items-end gap-0.5">
-                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 whitespace-nowrap inline-block">
                               {t('pay.partial')}
                             </span>
                             <span className="text-xs text-danger font-medium">-€ {formatCurrency(diff)}</span>
@@ -217,7 +217,7 @@ export default function Payments({ t }: PaymentsProps) {
                       </td>
                       <td className="px-4 py-3">
                         {p.confirmed && (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-accent-soft text-primary">✓</span>
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-accent-soft text-primary whitespace-nowrap inline-block">✓</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs text-text-muted max-w-[120px] truncate">
