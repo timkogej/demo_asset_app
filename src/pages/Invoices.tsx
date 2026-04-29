@@ -814,8 +814,6 @@ export default function Invoices({ t, language }: InvoicesProps) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        let responseData: unknown;
-        try { responseData = await response.json(); } catch { responseData = null; }
         if (!response.ok) {
           throw new Error(`Webhook failed: ${response.status}`);
         }
