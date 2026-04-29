@@ -429,6 +429,8 @@ export const translations = {
       kpi_monthly_total: 'TOTALE MESE CORRENTE',
       kpi_outstanding: 'DA INCASSARE',
       kpi_collected: 'INCASSATO ({year})',
+      billing_month: 'Mese di fatturazione',
+      billing_year: 'Anno fatturazione',
     },
     pay: {
       title: 'Pagamenti',
@@ -910,6 +912,8 @@ export const translations = {
       kpi_monthly_total: 'SKUPAJ TA MESEC',
       kpi_outstanding: 'ZA IZTERJATI',
       kpi_collected: 'PREJETO ({year})',
+      billing_month: 'Mesec obračuna',
+      billing_year: 'Leto obračuna',
     },
     pay: {
       title: 'Plačila',

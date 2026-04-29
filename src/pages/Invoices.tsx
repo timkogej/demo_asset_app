@@ -421,6 +421,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
   const [genMonth, setGenMonth] = useState(currentMonth);
   const [genYear, setGenYear] = useState(currentYear);
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [billingMonth, setBillingMonth] = useState<number>(new Date().getMonth() + 1);
+  const [billingYear, setBillingYear] = useState<number>(new Date().getFullYear());
   const [genDueDateMode, setGenDueDateMode] = useState<'default' | 'custom'>('default');
   const [genCustomDueDate, setGenCustomDueDate] = useState('');
   const [genDueDays, setGenDueDays] = useState(14);
@@ -1195,7 +1197,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         })(),
         input_language: form.inputLanguage,
         notes: form.notes,
-        billing_month: null,
+        billing_month: billingMonth,
+        billing_year_check: billingYear,
       };
 
       const { data: newInv, error } = await supabase
@@ -1275,7 +1278,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         })(),
         input_language: form.inputLanguage,
         notes: form.notes,
-        billing_month: null,
+        billing_month: billingMonth,
+        billing_year_check: billingYear,
       };
 
       const { data: newInv, error } = await supabase
@@ -1354,7 +1358,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         })(),
         input_language: form.inputLanguage,
         notes: form.notes,
-        billing_month: null,
+        billing_month: billingMonth,
+        billing_year_check: billingYear,
       };
 
       const { data: newInv, error } = await supabase
@@ -1405,6 +1410,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
     setShowManualForm(false);
     setShowLeaveConfirm(false);
     setForm(BLANK_FORM);
+    setBillingMonth(new Date().getMonth() + 1);
+    setBillingYear(new Date().getFullYear());
     setFormStep(1);
     setEditMode(false);
     setEditingInvoice(null);
@@ -1461,6 +1468,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         })),
         inputLanguage: (full as InvoiceRecord & { input_language?: 'IT' | 'SL' }).input_language || 'IT',
       });
+      setBillingMonth(full.billing_month || new Date().getMonth() + 1);
+      setBillingYear(full.billing_year_check || new Date().getFullYear());
       setFormStep(2);
       setFormPdfUrl(null);
       setShowManualForm(true);
@@ -1498,6 +1507,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         language:         clients.find((c) => c.id === form.clientId)?.country === 'SI' ? 'sl' : 'it',
         input_language:   form.inputLanguage,
         notes:            form.notes,
+        billing_month:    billingMonth,
+        billing_year_check: billingYear,
         updated_at:       new Date().toISOString(),
       }).eq('id', editingInvoice.id);
 
@@ -1571,11 +1582,36 @@ export default function Invoices({ t, language }: InvoicesProps) {
 
   const years = [currentYear - 1, currentYear, currentYear + 1];
 
+  const billingMonths = [
+    { value: 1,  it: 'Gennaio',   sl: 'Januar' },
+    { value: 2,  it: 'Febbraio',  sl: 'Februar' },
+    { value: 3,  it: 'Marzo',     sl: 'Marec' },
+    { value: 4,  it: 'Aprile',    sl: 'April' },
+    { value: 5,  it: 'Maggio',    sl: 'Maj' },
+    { value: 6,  it: 'Giugno',    sl: 'Junij' },
+    { value: 7,  it: 'Luglio',    sl: 'Julij' },
+    { value: 8,  it: 'Agosto',    sl: 'Avgust' },
+    { value: 9,  it: 'Settembre', sl: 'September' },
+    { value: 10, it: 'Ottobre',   sl: 'Oktober' },
+    { value: 11, it: 'Novembre',  sl: 'November' },
+    { value: 12, it: 'Dicembre',  sl: 'December' },
+  ];
+
+  const billingYears = [2024, 2025, 2026, 2027, 2028];
+
   const genDefaultDueDate = useMemo(() => {
     const d = new Date(invoiceDate);
     d.setDate(d.getDate() + genDueDays);
     return d.toISOString().split('T')[0];
   }, [invoiceDate, genDueDays]);
+
+  useEffect(() => {
+    if (form.invoiceDate) {
+      const d = new Date(form.invoiceDate);
+      setBillingMonth(d.getMonth() + 1);
+      setBillingYear(d.getFullYear());
+    }
+  }, [form.invoiceDate]);
 
   // ---- render ----
 
@@ -2312,6 +2348,67 @@ export default function Invoices({ t, language }: InvoicesProps) {
                         onChange={(e) => setForm((f) => ({ ...f, invoiceDate: e.target.value }))}
                         className="input-field"
                       />
+                    </div>
+                    <div>
+                      <label className="label">{t('inv.billing_month')}</label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <div style={{ position: 'relative', flex: 2 }}>
+                          <select
+                            value={billingMonth}
+                            onChange={e => setBillingMonth(Number(e.target.value))}
+                            style={{
+                              appearance: 'none',
+                              WebkitAppearance: 'none',
+                              padding: '8px 32px 8px 12px',
+                              border: '1px solid #a8d4b3',
+                              borderRadius: '8px',
+                              fontSize: '13px',
+                              color: '#1c2b22',
+                              background: 'white',
+                              cursor: 'pointer',
+                              outline: 'none',
+                              width: '100%',
+                            }}
+                          >
+                            {billingMonths.map(m => (
+                              <option key={m.value} value={m.value}>
+                                {language === 'sl' ? m.sl : m.it}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={14} strokeWidth={1.5} style={{
+                            position: 'absolute', right: '10px', top: '50%',
+                            transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b8f75',
+                          }} />
+                        </div>
+                        <div style={{ position: 'relative', flex: 1 }}>
+                          <select
+                            value={billingYear}
+                            onChange={e => setBillingYear(Number(e.target.value))}
+                            style={{
+                              appearance: 'none',
+                              WebkitAppearance: 'none',
+                              padding: '8px 32px 8px 12px',
+                              border: '1px solid #a8d4b3',
+                              borderRadius: '8px',
+                              fontSize: '13px',
+                              color: '#1c2b22',
+                              background: 'white',
+                              cursor: 'pointer',
+                              outline: 'none',
+                              width: '100%',
+                            }}
+                          >
+                            {billingYears.map(y => (
+                              <option key={y} value={y}>{y}</option>
+                            ))}
+                          </select>
+                          <ChevronDown size={14} strokeWidth={1.5} style={{
+                            position: 'absolute', right: '10px', top: '50%',
+                            transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b8f75',
+                          }} />
+                        </div>
+                      </div>
                     </div>
                     <div>
                       <label className="label">{t('inv.type')}</label>

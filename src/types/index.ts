@@ -195,6 +195,7 @@ export interface InvoiceRecord {
   created_at: string;
   updated_at: string;
   billing_month: number | null;
+  billing_year_check: number | null;
   // Relations
   client?: Client | null;
   vehicle?: Vehicle | null;
