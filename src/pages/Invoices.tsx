@@ -1141,6 +1141,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         billing_month: null,
+        billing_year_check: null,
         input_language: null,
         client: client as Client,
         vehicle: vehicle as Vehicle,
