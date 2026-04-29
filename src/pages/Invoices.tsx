@@ -762,10 +762,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
   // ---- send ----
 
   async function sendInvoiceById(invoiceId: string) {
-    console.log('sendInvoiceById called', invoiceId);
     const settings = await getSettings();
-    console.log('settings loaded', settings);
-    console.log('webhook url:', settings?.n8n_webhook_url);
 
     if (!settings?.n8n_webhook_url) {
       toast.error('N8N Webhook URL non configurato / N8N Webhook URL ni nastavljen');
@@ -811,17 +808,14 @@ export default function Invoices({ t, language }: InvoicesProps) {
         language: full.language ?? 'it',
         service_period: full.service_period ?? '',
       };
-      console.log('Sending webhook payload:', payload);
       try {
         const response = await fetch(settings.n8n_webhook_url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        console.log('Webhook response status:', response.status);
         let responseData: unknown;
         try { responseData = await response.json(); } catch { responseData = null; }
-        console.log('Webhook response data:', responseData);
         if (!response.ok) {
           throw new Error(`Webhook failed: ${response.status}`);
         }
