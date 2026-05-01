@@ -962,7 +962,7 @@ export default function Settings({ t, language }: SettingsProps) {
                         className="input-field w-full"
                         value={form.n8n_monthly_webhook_url ?? ''}
                         onChange={(e) => handleChange('n8n_monthly_webhook_url', e.target.value)}
-                        placeholder="https://tikej.app.n8n.cloud/webhook/generate-monthly-invoices"
+                        placeholder="https://n8n.jedroplus.com/webhook/generate-monthly-invoices"
                       />
                     </div>
 
@@ -974,7 +974,7 @@ export default function Settings({ t, language }: SettingsProps) {
                         className="input-field w-full"
                         value={form.vies_webhook_url ?? ''}
                         onChange={(e) => handleChange('vies_webhook_url', e.target.value)}
-                        placeholder="https://tikej.app.n8n.cloud/webhook/vies-check"
+                        placeholder="https://n8n.jedroplus.com/webhook/vies-check"
                       />
                     </div>
 
@@ -1007,7 +1007,7 @@ export default function Settings({ t, language }: SettingsProps) {
                         className="input-field w-full"
                         value={form.deepl_webhook_url ?? ''}
                         onChange={(e) => handleChange('deepl_webhook_url', e.target.value)}
-                        placeholder="https://tikej.app.n8n.cloud/webhook/deepl-translate"
+                        placeholder="https://n8n.jedroplus.com/webhook/deepl-translate"
                       />
                     </div>
                   </div>
