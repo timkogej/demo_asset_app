@@ -698,6 +698,12 @@ export default function Invoices({ t, language }: InvoicesProps) {
       const { data: codes } = await supabase.from('invoice_codes').select('*');
       const blob = await generateInvoicePDF(full, settings, (codes as InvoiceCode[]) || undefined);
       const url = URL.createObjectURL(blob);
+      if (/Android/i.test(navigator.userAgent) && /Chrome/i.test(navigator.userAgent)) {
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        setPreviewInvoice(null);
+        return;
+      }
       setPdfBlobUrl(url);
       setPreviewIsBlob(true);
     } catch {
@@ -1155,6 +1161,11 @@ export default function Invoices({ t, language }: InvoicesProps) {
       };
       const blob = await generateInvoicePDF(fakeInvoice, settings, invoiceCodes.length > 0 ? invoiceCodes : undefined);
       const url = URL.createObjectURL(blob);
+      if (/Android/i.test(navigator.userAgent) && /Chrome/i.test(navigator.userAgent)) {
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        return;
+      }
       setFormPdfUrl(url);
     } catch {
       toast.error(t('error.pdf_failed'));

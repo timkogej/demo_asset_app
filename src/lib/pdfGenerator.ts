@@ -449,10 +449,11 @@ export async function generateInvoicePDF(
     body: tableBody,
     theme: 'grid',
     styles: {
-      fontSize: 7.5,
-      cellPadding: { top: 1.5, right: 2, bottom: 1.5, left: 2 },
+      fontSize: 7,
+      cellPadding: { top: 1.5, right: 1.5, bottom: 1.5, left: 1.5 },
       lineColor: [0, 0, 0],
       lineWidth: 0.2,
+      overflow: 'linebreak',
     },
     headStyles: {
       fontStyle: 'bold',
@@ -461,12 +462,13 @@ export async function generateInvoicePDF(
       lineWidth: 0.3,
     },
     columnStyles: {
-      0: { cellWidth: 12 },
-      1: { cellWidth: 95 },
-      2: { cellWidth: 15, halign: 'center' },
-      3: { cellWidth: 30, halign: 'right' },
-      4: { cellWidth: 30, halign: 'right' },
+      0: { cellWidth: 10 },
+      1: { cellWidth: 98 },
+      2: { cellWidth: 12, halign: 'center' },
+      3: { cellWidth: 28, halign: 'right' },
+      4: { cellWidth: 28, halign: 'right' },
     },
+    tableWidth: 176,
     margin: { left: marginL, right: 10 },
   });
 
