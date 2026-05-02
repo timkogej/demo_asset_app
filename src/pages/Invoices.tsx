@@ -158,6 +158,63 @@ function isMobileAndroid(): boolean {
   return /Android/i.test(navigator.userAgent);
 }
 
+function PdfPreviewContent({ pdfUrl, t }: { pdfUrl: string; t: (k: string) => string }) {
+  if (isMobileAndroid()) {
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '300px',
+        gap: '20px',
+        background: '#f8faf8',
+        borderRadius: '8px',
+        border: '1px solid #d4ead9',
+      }}>
+        <FileText size={56} strokeWidth={1.2} color="#1a4731" />
+        <p style={{ color: '#6b8f75', textAlign: 'center', fontSize: '14px', margin: '0 24px' }}>
+          {t('inv.preview_android_note')}
+        </p>
+        <a
+          href={pdfUrl}
+          download="Fattura.pdf"
+          style={{
+            background: '#1a4731',
+            color: 'white',
+            padding: '12px 28px',
+            borderRadius: '8px',
+            textDecoration: 'none',
+            fontSize: '14px',
+            fontWeight: '600',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <Download size={16} strokeWidth={1.5} />
+          {t('inv.download')}
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <object
+      data={pdfUrl}
+      type="application/pdf"
+      style={{ width: '100%', height: '65vh', border: 'none', borderRadius: '8px' }}
+    >
+      <div style={{ textAlign: 'center', padding: '40px' }}>
+        <p>{t('inv.preview_not_supported')}</p>
+        <a href={pdfUrl} download style={{ color: '#1a4731' }}>
+          {t('inv.download')}
+        </a>
+      </div>
+    </object>
+  );
+}
+
 // ---- MarkAsPaidModal ----
 
 interface PaymentFormData {
@@ -429,7 +486,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
 
   // preview
   const [previewInvoice, setPreviewInvoice] = useState<InvoiceRecord | null>(null);
-  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+  const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [previewPayments, setPreviewPayments] = useState<Payment[]>([]);
 
@@ -451,7 +509,6 @@ export default function Invoices({ t, language }: InvoicesProps) {
   const [filteredVehicles, setFilteredVehicles] = useState<Vehicle[]>([]);
   const [clientError, setClientError] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
-  const [formPdfUrl, setFormPdfUrl] = useState<string | null>(null);
   const [formPdfLoading, setFormPdfLoading] = useState(false);
   const [invoiceCodes, setInvoiceCodes] = useState<InvoiceCode[]>([]);
   const viesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -635,8 +692,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
     }
   }
 
-  // Track whether pdfBlobUrl is a local blob (needs revoke) or a signed URL (does not)
-  const [previewIsBlob, setPreviewIsBlob] = useState(false);
+
 
   // ---- shared: fetch full invoice with all relations ----
 
@@ -686,26 +742,36 @@ export default function Invoices({ t, language }: InvoicesProps) {
 
   // ---- preview ----
 
+  function openPdfPreview(pdfUrl: string): boolean {
+    const isAndroidChrome = /Android/i.test(navigator.userAgent) &&
+                            /Chrome/i.test(navigator.userAgent) &&
+                            !/EdgA|OPR|Opera/i.test(navigator.userAgent);
+    if (isAndroidChrome) {
+      window.open(pdfUrl, '_blank');
+      return true;
+    }
+    setPdfPreviewUrl(pdfUrl);
+    setShowPdfModal(true);
+    return false;
+  }
+
   async function openPreview(invoice: InvoiceRecord) {
     setPreviewInvoice(invoice);
-    setPdfBlobUrl(null);
+    setPdfPreviewUrl(null);
+    setShowPdfModal(false);
     setPdfLoading(true);
     setPreviewPayments([]);
     try {
-      // Always fetch fresh full invoice data so client/vehicle relations are complete
       const full = await fetchFullInvoice(invoice.id);
       const settings = await getSettings();
       const { data: codes } = await supabase.from('invoice_codes').select('*');
       const blob = await generateInvoicePDF(full, settings, (codes as InvoiceCode[]) || undefined);
       const url = URL.createObjectURL(blob);
-      if (/Android/i.test(navigator.userAgent) && /Chrome/i.test(navigator.userAgent)) {
-        window.open(url, '_blank');
+      if (openPdfPreview(url)) {
         setTimeout(() => URL.revokeObjectURL(url), 10000);
         setPreviewInvoice(null);
         return;
       }
-      setPdfBlobUrl(url);
-      setPreviewIsBlob(true);
     } catch {
       toast.error(t('error.pdf_failed'));
     } finally {
@@ -721,10 +787,10 @@ export default function Invoices({ t, language }: InvoicesProps) {
   }
 
   function closePreview() {
-    if (previewIsBlob && pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
-    setPdfBlobUrl(null);
+    if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+    setPdfPreviewUrl(null);
+    setShowPdfModal(false);
     setPreviewInvoice(null);
-    setPreviewIsBlob(false);
     setPreviewPayments([]);
   }
 
@@ -971,7 +1037,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         items: [],
       });
       setFormStep(1);
-      setFormPdfUrl(null);
+      setPdfPreviewUrl(null);
+      setShowPdfModal(false);
       // Peek at next number (read-only, does NOT increment the sequence)
       const { data: peekData } = await supabase
         .rpc('peek_next_invoice_number', { p_year: new Date().getFullYear() });
@@ -1110,7 +1177,9 @@ export default function Invoices({ t, language }: InvoicesProps) {
 
   async function goToStep3() {
     setFormStep(3);
-    setFormPdfUrl(null);
+    if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+    setPdfPreviewUrl(null);
+    setShowPdfModal(false);
     setFormPdfLoading(true);
     try {
       const settings = await getFormSettings();
@@ -1161,12 +1230,10 @@ export default function Invoices({ t, language }: InvoicesProps) {
       };
       const blob = await generateInvoicePDF(fakeInvoice, settings, invoiceCodes.length > 0 ? invoiceCodes : undefined);
       const url = URL.createObjectURL(blob);
-      if (/Android/i.test(navigator.userAgent) && /Chrome/i.test(navigator.userAgent)) {
-        window.open(url, '_blank');
+      if (openPdfPreview(url)) {
         setTimeout(() => URL.revokeObjectURL(url), 10000);
         return;
       }
-      setFormPdfUrl(url);
     } catch {
       toast.error(t('error.pdf_failed'));
     } finally {
@@ -1417,8 +1484,9 @@ export default function Invoices({ t, language }: InvoicesProps) {
   }
 
   function closeManualForm() {
-    if (formPdfUrl) URL.revokeObjectURL(formPdfUrl);
-    setFormPdfUrl(null);
+    if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+    setPdfPreviewUrl(null);
+    setShowPdfModal(false);
     setShowManualForm(false);
     setShowLeaveConfirm(false);
     setForm(BLANK_FORM);
@@ -1483,7 +1551,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
       setBillingMonth(full.billing_month || new Date().getMonth() + 1);
       setBillingYear(full.billing_year_check || new Date().getFullYear());
       setFormStep(2);
-      setFormPdfUrl(null);
+      setPdfPreviewUrl(null);
+      setShowPdfModal(false);
       setShowManualForm(true);
       // Fetch invoice codes for autocomplete
       const { data: codes } = await supabase
@@ -2184,41 +2253,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
                 <div className="h-full flex items-center justify-center">
                   <span className="spinner" />
                 </div>
-              ) : pdfBlobUrl ? (
-                isMobileAndroid() ? (
-                  <div style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    height: '300px',
-                    gap: '16px',
-                    background: '#f8faf8',
-                    borderRadius: '8px',
-                    border: '1px solid #d4ead9',
-                  }}>
-                    <FileText size={48} strokeWidth={1.5} color="#1a4731" />
-                    <p style={{ color: '#6b8f75', textAlign: 'center', margin: 0 }}>
-                      {t('inv.preview_not_available_android')}
-                    </p>
-                    <button onClick={() => handleDownload(previewInvoice!)} style={{
-                      background: '#1a4731',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '10px 24px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                    }}>
-                      <Download size={16} strokeWidth={1.5} />
-                      {t('inv.download')}
-                    </button>
-                  </div>
-                ) : (
-                  <iframe src={pdfBlobUrl} className="w-full h-full" title="Invoice Preview" />
-                )
+              ) : pdfPreviewUrl ? (
+                <PdfPreviewContent pdfUrl={pdfPreviewUrl} t={t} />
               ) : (
                 <div className="h-full flex items-center justify-center text-text-muted text-sm">
                   {t('error.pdf_failed')}
@@ -2852,27 +2888,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
                     <div className="flex items-center justify-center h-96">
                       <span className="spinner" />
                     </div>
-                  ) : formPdfUrl ? (
-                    isMobileAndroid() ? (
-                      <div style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        height: '300px',
-                        gap: '16px',
-                        background: '#f8faf8',
-                        borderRadius: '8px',
-                        border: '1px solid #d4ead9',
-                      }}>
-                        <FileText size={48} strokeWidth={1.5} color="#1a4731" />
-                        <p style={{ color: '#6b8f75', textAlign: 'center', margin: 0 }}>
-                          {t('inv.preview_not_available_android')}
-                        </p>
-                      </div>
-                    ) : (
-                      <iframe src={formPdfUrl} className="w-full" style={{ height: '60vh' }} title="Preview" />
-                    )
+                  ) : pdfPreviewUrl ? (
+                    <PdfPreviewContent pdfUrl={pdfPreviewUrl} t={t} />
                   ) : (
                     <div className="flex items-center justify-center h-96 text-text-muted text-sm">
                       {t('error.pdf_failed')}
