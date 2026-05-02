@@ -487,7 +487,6 @@ export default function Invoices({ t, language }: InvoicesProps) {
   // preview
   const [previewInvoice, setPreviewInvoice] = useState<InvoiceRecord | null>(null);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
-  const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [previewPayments, setPreviewPayments] = useState<Payment[]>([]);
 
@@ -751,14 +750,12 @@ export default function Invoices({ t, language }: InvoicesProps) {
       return true;
     }
     setPdfPreviewUrl(pdfUrl);
-    setShowPdfModal(true);
     return false;
   }
 
   async function openPreview(invoice: InvoiceRecord) {
     setPreviewInvoice(invoice);
     setPdfPreviewUrl(null);
-    setShowPdfModal(false);
     setPdfLoading(true);
     setPreviewPayments([]);
     try {
@@ -789,7 +786,6 @@ export default function Invoices({ t, language }: InvoicesProps) {
   function closePreview() {
     if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
     setPdfPreviewUrl(null);
-    setShowPdfModal(false);
     setPreviewInvoice(null);
     setPreviewPayments([]);
   }
@@ -1038,7 +1034,6 @@ export default function Invoices({ t, language }: InvoicesProps) {
       });
       setFormStep(1);
       setPdfPreviewUrl(null);
-      setShowPdfModal(false);
       // Peek at next number (read-only, does NOT increment the sequence)
       const { data: peekData } = await supabase
         .rpc('peek_next_invoice_number', { p_year: new Date().getFullYear() });
@@ -1179,7 +1174,6 @@ export default function Invoices({ t, language }: InvoicesProps) {
     setFormStep(3);
     if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
     setPdfPreviewUrl(null);
-    setShowPdfModal(false);
     setFormPdfLoading(true);
     try {
       const settings = await getFormSettings();
@@ -1486,7 +1480,6 @@ export default function Invoices({ t, language }: InvoicesProps) {
   function closeManualForm() {
     if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
     setPdfPreviewUrl(null);
-    setShowPdfModal(false);
     setShowManualForm(false);
     setShowLeaveConfirm(false);
     setForm(BLANK_FORM);
@@ -1552,7 +1545,6 @@ export default function Invoices({ t, language }: InvoicesProps) {
       setBillingYear(full.billing_year_check || new Date().getFullYear());
       setFormStep(2);
       setPdfPreviewUrl(null);
-      setShowPdfModal(false);
       setShowManualForm(true);
       // Fetch invoice codes for autocomplete
       const { data: codes } = await supabase
