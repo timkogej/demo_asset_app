@@ -166,6 +166,9 @@ export const translations = {
       details_tab: 'Dettagli',
       edit_tab: 'Modifica',
       save_changes: 'Salva modifiche',
+      billing_active: 'Fatturazione mensile',
+      billing_yes: 'Attivo',
+      billing_no: 'Non attivo',
     },
     cli: {
       title: 'Partner',
@@ -652,6 +655,9 @@ export const translations = {
       details_tab: 'Podrobnosti',
       edit_tab: 'Uredi',
       save_changes: 'Shrani spremembe',
+      billing_active: 'Mesečni obračun',
+      billing_yes: 'Aktivno',
+      billing_no: 'Neaktivno',
     },
     cli: {
       title: 'Partnerji',

@@ -55,6 +55,7 @@ interface VehicleFormData {
   deposit: string;
   lease_months: string;
   vehicle_country: string;
+  billing_active: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -82,6 +83,7 @@ const emptyForm: VehicleFormData = {
   deposit: '',
   lease_months: '',
   vehicle_country: '',
+  billing_active: true,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -110,6 +112,7 @@ function vehicleToForm(v: Vehicle): VehicleFormData {
     deposit: v.deposit?.toString() ?? '',
     lease_months: v.lease_months?.toString() ?? '',
     vehicle_country: v.vehicle_country ?? '',
+    billing_active: v.billing_active ?? true,
   };
 }
 
@@ -138,6 +141,7 @@ function buildPayload(form: VehicleFormData) {
     deposit: isProprieta ? null : (form.deposit ? parseFloat(form.deposit) : null),
     lease_months: isProprieta ? null : (form.lease_months ? parseInt(form.lease_months) : null),
     vehicle_country: form.vehicle_country || null,
+    billing_active: form.billing_active,
   };
 }
 
@@ -581,6 +585,27 @@ function VehicleFormContent({
             ))}
           </select>
         </div>
+      </div>
+
+      {/* ── Billing active ── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <label className="label">{t('veh.billing_active')}</label>
+        <button
+          type="button"
+          onClick={() => setForm((f) => ({ ...f, billing_active: !f.billing_active }))}
+          style={{
+            background: form.billing_active ? '#1a4731' : '#d1d5db',
+            borderRadius: '20px',
+            padding: '4px 16px',
+            border: 'none',
+            color: 'white',
+            fontWeight: '600',
+            fontSize: '12px',
+            cursor: 'pointer',
+          }}
+        >
+          {form.billing_active ? t('veh.billing_yes') : t('veh.billing_no')}
+        </button>
       </div>
 
       {/* ── Computed preview ── */}
@@ -1172,6 +1197,15 @@ export default function Vehicles({ t }: VehiclesProps) {
     }
   };
 
+  const handleToggleBilling = async (vehicleId: string, current: boolean) => {
+    const { error } = await supabase
+      .from('vehicles')
+      .update({ billing_active: !current })
+      .eq('id', vehicleId);
+    if (error) toast.error(t('error.generic'));
+    else fetchData();
+  };
+
   const handleSort = (key: string) => {
     setSortConfig(prev => {
       if (!prev || prev.key !== key) return { key, dir: 'asc' };
@@ -1365,6 +1399,10 @@ export default function Vehicles({ t }: VehiclesProps) {
                   <th className={th('white')} style={thStyle('white')} onClick={() => handleSort('status')}>
                     {t('vehicles.status')} <SortIcon colKey="status" />
                   </th>
+                  {/* Obračun */}
+                  <th className={th('white')} style={thStyle('white')}>
+                    {t('veh.billing_active')}
+                  </th>
                   {/* Proprietà */}
                   <th className={th('white')} style={thStyle('white')} onClick={() => handleSort('ownership_status')}>
                     {t('veh.ownership_status')} <SortIcon colKey="ownership_status" />
@@ -1453,6 +1491,25 @@ export default function Vehicles({ t }: VehiclesProps) {
                       {/* Stato */}
                       <td className={td}>
                         <Badge status={v.status ?? ''} t={(k) => t(k)} />
+                      </td>
+                      {/* Obračun */}
+                      <td className={td} onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleToggleBilling(v.id, v.billing_active)}
+                          style={{
+                            background: v.billing_active ? '#d4ead9' : '#fee2e2',
+                            color: v.billing_active ? '#1a4731' : '#991b1b',
+                            border: 'none',
+                            borderRadius: '20px',
+                            padding: '4px 12px',
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {v.billing_active ? t('veh.billing_yes') : t('veh.billing_no')}
+                        </button>
                       </td>
                       {/* Proprietà */}
                       <td className={td}>

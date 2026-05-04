@@ -33,6 +33,7 @@ export interface Vehicle {
   year: number | null;
   current_km: number;
   status: string | null;
+  billing_active: boolean;
   client_id: string | null;
   lease_start_date: string | null;
   lease_end_date: string | null;
