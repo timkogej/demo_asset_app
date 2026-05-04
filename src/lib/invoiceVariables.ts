@@ -60,7 +60,7 @@ export function resolveVariables(
     '{deposit}':               v.deposit != null ? String(v.deposit) : '',
     '{client_name}':           String(c.company_name_additional || c.company_name || ''),
     '{client_address}':        String(c.address || ''),
-    '{contract_date}':         formatDate(data.contractDate || (v.lease_start_date as string | undefined)),
+    '{contract_date}':         formatDate((v.contract_date as string | undefined) || data.contractDate || (v.lease_start_date as string | undefined)),
     '{service_period}':        data.servicePeriod || '',
     '{invoice_date}':          formatDate(data.invoiceDate),
     '{damage_article}':        '',

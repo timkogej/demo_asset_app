@@ -360,6 +360,9 @@ export async function generateInvoicePDF(
   // ─── ITEMS TABLE ─────────────────────────────────────────────────────────
   const items = invoice.items || [];
 
+  const contractDateRaw = invoice.vehicle?.contract_date || invoice.vehicle?.lease_start_date || null;
+  const formattedContractDate = contractDateRaw ? formatDateIT(contractDateRaw) : '';
+
   function isPurelyNumeric(text: string): boolean {
     return /^[\d\s.,€$/+-]+$/.test(text.trim());
   }
@@ -385,7 +388,8 @@ export async function generateInvoicePDF(
       continue;
     }
 
-    let desc = await biDesc(item.description, item.code, inputLang);
+    const resolvedDescription = item.description.replaceAll('{contract_date}', formattedContractDate);
+    let desc = await biDesc(resolvedDescription, item.code, inputLang);
 
     // Safety check: Italian clients MUST have Italian secondary
     if (secondaryLang === 'IT' && !desc.secondary && desc.primary) {

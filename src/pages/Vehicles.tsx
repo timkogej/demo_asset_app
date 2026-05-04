@@ -44,6 +44,7 @@ interface VehicleFormData {
   ownership_status: 'LEASING' | "PROPRIETA'";
   leasing_company: string;
   contract_number: string;
+  contract_date: string;
   lease_installment: string;
   registration_expiry: string;
   next_inspection: string;
@@ -70,6 +71,7 @@ const emptyForm: VehicleFormData = {
   ownership_status: 'LEASING',
   leasing_company: '',
   contract_number: '',
+  contract_date: '',
   lease_installment: '',
   registration_expiry: '',
   next_inspection: '',
@@ -97,6 +99,7 @@ function vehicleToForm(v: Vehicle): VehicleFormData {
     ownership_status: v.ownership_status,
     leasing_company: v.leasing_company ?? '',
     contract_number: v.contract_number ?? '',
+    contract_date: v.contract_date ?? '',
     lease_installment: v.lease_installment?.toString() ?? '',
     registration_expiry: v.registration_expiry ?? '',
     next_inspection: v.next_inspection ?? '',
@@ -124,6 +127,7 @@ function buildPayload(form: VehicleFormData) {
     ownership_status: form.ownership_status,
     leasing_company: isProprieta ? null : (form.leasing_company || null),
     contract_number: isProprieta ? '*-*' : (form.contract_number || null),
+    contract_date: form.contract_date || null,
     lease_installment: isProprieta ? null : (form.lease_installment ? parseFloat(form.lease_installment) : null),
     registration_expiry: form.registration_expiry || null,
     next_inspection: form.next_inspection || null,
@@ -475,6 +479,10 @@ function VehicleFormContent({
             <div>
               <label className="label">{t('veh.lease_months')}</label>
               <input type="number" className="input-field" value={form.lease_months} onChange={upd('lease_months')} placeholder="36" min="1" />
+            </div>
+            <div className="col-span-2">
+              <label className="label">{t('veh.contract_date')}</label>
+              <input type="date" className="input-field" value={form.contract_date} onChange={upd('contract_date')} />
             </div>
             <div>
               <label className="label">{t('veh.lease_installment')} (€)</label>

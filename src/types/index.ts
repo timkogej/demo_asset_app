@@ -39,6 +39,7 @@ export interface Vehicle {
   ownership_status: 'LEASING' | "PROPRIETA'";
   leasing_company: string | null;
   contract_number: string | null;
+  contract_date: string | null;
   lease_installment: number | null;
   registration_expiry: string | null;
   next_inspection: string | null;
