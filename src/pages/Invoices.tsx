@@ -158,45 +158,58 @@ function isMobileAndroid(): boolean {
   return /Android/i.test(navigator.userAgent);
 }
 
+function isIOS(): boolean {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function isSafariBrowser(): boolean {
+  const ua = navigator.userAgent;
+  return /Safari/i.test(ua) && !/Chrome|CriOS|FxiOS|EdgiOS|OPiOS/i.test(ua);
+}
+
+function MobilePdfFallback({ pdfUrl, t }: { pdfUrl: string; t: (k: string) => string }) {
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: '300px',
+      gap: '20px',
+      background: '#f8faf8',
+      borderRadius: '8px',
+      border: '1px solid #d4ead9',
+    }}>
+      <FileText size={56} strokeWidth={1.2} color="#1a4731" />
+      <p style={{ color: '#6b8f75', textAlign: 'center', fontSize: '14px', margin: '0 24px' }}>
+        {t('inv.preview_android_note')}
+      </p>
+      <a
+        href={pdfUrl}
+        download="Fattura.pdf"
+        style={{
+          background: '#1a4731',
+          color: 'white',
+          padding: '12px 28px',
+          borderRadius: '8px',
+          textDecoration: 'none',
+          fontSize: '14px',
+          fontWeight: '600',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}
+      >
+        <Download size={16} strokeWidth={1.5} />
+        {t('inv.download')}
+      </a>
+    </div>
+  );
+}
+
 function PdfPreviewContent({ pdfUrl, t }: { pdfUrl: string; t: (k: string) => string }) {
-  if (isMobileAndroid()) {
-    return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '300px',
-        gap: '20px',
-        background: '#f8faf8',
-        borderRadius: '8px',
-        border: '1px solid #d4ead9',
-      }}>
-        <FileText size={56} strokeWidth={1.2} color="#1a4731" />
-        <p style={{ color: '#6b8f75', textAlign: 'center', fontSize: '14px', margin: '0 24px' }}>
-          {t('inv.preview_android_note')}
-        </p>
-        <a
-          href={pdfUrl}
-          download="Fattura.pdf"
-          style={{
-            background: '#1a4731',
-            color: 'white',
-            padding: '12px 28px',
-            borderRadius: '8px',
-            textDecoration: 'none',
-            fontSize: '14px',
-            fontWeight: '600',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-          }}
-        >
-          <Download size={16} strokeWidth={1.5} />
-          {t('inv.download')}
-        </a>
-      </div>
-    );
+  if (isMobileAndroid() || isIOS()) {
+    return <MobilePdfFallback pdfUrl={pdfUrl} t={t} />;
   }
 
   return (
@@ -742,10 +755,12 @@ export default function Invoices({ t, language }: InvoicesProps) {
   // ---- preview ----
 
   function openPdfPreview(pdfUrl: string): boolean {
-    const isAndroidChrome = /Android/i.test(navigator.userAgent) &&
-                            /Chrome/i.test(navigator.userAgent) &&
-                            !/EdgA|OPR|Opera/i.test(navigator.userAgent);
-    if (isAndroidChrome) {
+    const ua = navigator.userAgent;
+    const isAndroidChrome = /Android/i.test(ua) &&
+                            /Chrome/i.test(ua) &&
+                            !/EdgA|OPR|Opera/i.test(ua);
+    const isAppleMobile = /iPhone|iPad|iPod/i.test(ua);
+    if (isAndroidChrome || isAppleMobile) {
       window.open(pdfUrl, '_blank');
       return true;
     }
