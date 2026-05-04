@@ -193,6 +193,7 @@ function getSortValue(v: Vehicle, key: string): string | number | null {
     case 'ownership_status': return v.ownership_status;
     case 'leasing_company': return v.leasing_company;
     case 'contract_number': return v.contract_number;
+    case 'contract_date': return v.contract_date;
     case 'lease_installment': return v.lease_installment;
     case 'received_installment': return v.received_installment;
     case 'insurance_company': return v.insurance_company;
@@ -1354,6 +1355,9 @@ export default function Vehicles({ t }: VehiclesProps) {
                   <th className={th('green')} style={thStyle('green')} onClick={() => handleSort('contract_number')}>
                     {t('veh.contract_number')} <SortIcon colKey="contract_number" />
                   </th>
+                  <th className={th('green')} style={thStyle('green')} onClick={() => handleSort('contract_date')}>
+                    {t('veh.contract_date')} <SortIcon colKey="contract_date" />
+                  </th>
                   <th className={th('green')} style={thStyle('green')} onClick={() => handleSort('lease_installment')}>
                     {t('veh.lease_installment')} <SortIcon colKey="lease_installment" />
                   </th>
@@ -1436,6 +1440,7 @@ export default function Vehicles({ t }: VehiclesProps) {
                       {/* Leasing */}
                       <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : (v.leasing_company || <span className="text-text-muted">—</span>)}</td>
                       <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : (v.contract_number || <span className="text-text-muted">—</span>)}</td>
+                      <td className={td}>{v.contract_date ? formatDate(v.contract_date) : <span className="text-text-muted">—</span>}</td>
                       <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : formatCurrency(v.lease_installment)}</td>
                       <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : formatCurrency(v.received_installment)}</td>
                       {/* Insurance */}
