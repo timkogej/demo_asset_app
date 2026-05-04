@@ -206,6 +206,12 @@ export async function generateInvoicePDF(
     };
   };
 
+  const isCancelled = invoice.status === 'cancelled';
+
+  const displaySubtotal = isCancelled ? 0 : invoice.subtotal;
+  const displayVatAmount = isCancelled ? 0 : invoice.vat_amount;
+  const displayTotal = isCancelled ? 0 : invoice.total;
+
   const marginL = 15;
   const marginR = 195;
   let y = 10;
@@ -358,7 +364,10 @@ export async function generateInvoicePDF(
   y += 20;
 
   // ─── ITEMS TABLE ─────────────────────────────────────────────────────────
-  const items = invoice.items || [];
+  const rawItems = invoice.items || [];
+  const items = isCancelled
+    ? rawItems.map(item => ({ ...item, unit_price: 0, total: 0 }))
+    : rawItems;
 
   const contractDateRaw = invoice.vehicle?.contract_date || invoice.vehicle?.lease_start_date || null;
   const formattedContractDate = contractDateRaw ? formatDateIT(contractDateRaw) : '';
@@ -478,6 +487,16 @@ export async function generateInvoicePDF(
 
   const tableEndY = (doc as any).lastAutoTable.finalY;
 
+  if (isCancelled) {
+    const stornoY = tableEndY + 6;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(180, 0, 0);
+    doc.text('Racun je storniran.', marginL, stornoY);
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'normal');
+  }
+
   // ─── TOTALS (right) ──────────────────────────────────────────────────────
   const totalsX = 140;
   y = tableEndY + 5;
@@ -486,7 +505,7 @@ export async function generateInvoicePDF(
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
   doc.text(bi('neto'), totalsX, y);
-  doc.text(`${formatCurrency(invoice.subtotal)} EUR`, marginR, y, { align: 'right' });
+  doc.text(`${formatCurrency(displaySubtotal)} EUR`, marginR, y, { align: 'right' });
   y += 5;
 
   if (invoice.is_reverse_charge) {
@@ -500,14 +519,14 @@ export async function generateInvoicePDF(
       : secondaryLang === 'EN' ? `DDV / VAT ${invoice.vat_rate || 22}%`
       : `DDV ${invoice.vat_rate || 22}%`;
     doc.text(vatLabel, totalsX, y);
-    doc.text(`${formatCurrency(invoice.vat_amount)} EUR`, marginR, y, { align: 'right' });
+    doc.text(`${formatCurrency(displayVatAmount)} EUR`, marginR, y, { align: 'right' });
   }
   y += 5;
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.text(bi('SKUPAJ'), totalsX, y);
-  doc.text(`${formatCurrency(invoice.total)} EUR`, marginR, y, { align: 'right' });
+  doc.text(`${formatCurrency(displayTotal)} EUR`, marginR, y, { align: 'right' });
   doc.setFont('helvetica', 'normal');
 
   // ─── PAYMENT INFO (left, aligned with totals) ─────────────────────────────
@@ -573,6 +592,19 @@ export async function generateInvoicePDF(
 
   if (varentLogoBase64) {
     doc.addImage(varentLogoBase64, 'JPEG', 70, footerY + 2, 70, 26);
+  }
+
+  if (isCancelled) {
+    doc.saveGraphicsState();
+    doc.setGState(doc.GState({ opacity: 0.12 }));
+    doc.setTextColor(200, 0, 0);
+    doc.setFontSize(80);
+    doc.setFont('helvetica', 'bold');
+    doc.text('STORNO', 210 / 2, 297 / 2, { align: 'center', angle: 45 });
+    doc.restoreGraphicsState();
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
   }
 
   return doc.output('blob');

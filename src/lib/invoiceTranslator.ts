@@ -127,7 +127,7 @@ export function normalizeITtoSL(text: string): string {
 
   // Handle "CANONE MESE DI APRILE 2026" → "MESECNINA ZA APRIL 2026"
   result = result.replace(
-    /CANONE MESE DI ([A-Z]+) (\d{4})/gi,
+    /CANONE MESE DI\s+([A-Z]+)\s+(\d{4})/gi,
     (_match, month, year) => {
       const slMonth = IT_TO_SL_MONTHS[month.toUpperCase()] || month;
       return `MESECNINA ZA ${slMonth.toUpperCase()} ${year}`;
@@ -317,7 +317,7 @@ export function normalizeSLtoIT(text: string): string {
 
   // Handle MESECNINA ZA + month + year
   result = result.replace(
-    /MESECNINA ZA ([A-Z]+) (\d{4})/gi,
+    /MESECNINA ZA\s+([A-Z]+)\s+(\d{4})/gi,
     (_match, month, year) => {
       const itMonth = SL_TO_IT_MONTHS[month.toUpperCase()] || month;
       return `CANONE MESE DI ${itMonth} ${year}`;
@@ -326,7 +326,7 @@ export function normalizeSLtoIT(text: string): string {
 
   // Handle MESECNINA ZA + month (no year)
   result = result.replace(
-    /MESECNINA ZA ([A-Z]+)$/gi,
+    /MESECNINA ZA\s+([A-Z]+)$/gi,
     (_match, month) => {
       const itMonth = SL_TO_IT_MONTHS[month.toUpperCase()] || month;
       return `CANONE MESE DI ${itMonth}`;

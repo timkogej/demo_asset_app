@@ -1139,23 +1139,48 @@ export default function Settings({ t, language }: SettingsProps) {
 
                               {/* Unit price var (item only) */}
                               {line.line_type === 'item' && (
-                                <div className="flex gap-2 items-center">
-                                  <span className="text-xs text-text-muted w-16 shrink-0">
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '160px' }}>
+                                  <label style={{
+                                    fontSize: '11px',
+                                    color: '#6b8f75',
+                                    fontWeight: '600',
+                                    whiteSpace: 'nowrap',
+                                  }}>
                                     {t('settings.unit_price_var')}
-                                  </span>
-                                  <select
-                                    value={line.unit_price_var ?? ''}
-                                    onChange={(e) => updateLine(activeTemplateType, line.id, { unit_price_var: e.target.value || null })}
-                                    className="input-field"
-                                    style={{ fontSize: '12px', padding: '4px 8px' }}
-                                  >
-                                    <option value="">— brez / nessuno —</option>
-                                    {TEMPLATE_VARIABLES.filter((v) => v.category === 'financial').map((v) => (
-                                      <option key={v.key} value={v.key}>
-                                        {v.key} — {v.label_sl}
-                                      </option>
-                                    ))}
-                                  </select>
+                                  </label>
+                                  <div style={{ position: 'relative' }}>
+                                    <select
+                                      value={line.unit_price_var ?? ''}
+                                      onChange={(e) => updateLine(activeTemplateType, line.id, { unit_price_var: e.target.value || null })}
+                                      style={{
+                                        appearance: 'none',
+                                        WebkitAppearance: 'none',
+                                        width: '100%',
+                                        padding: '6px 28px 6px 10px',
+                                        border: '1px solid #a8d4b3',
+                                        borderRadius: '6px',
+                                        fontSize: '12px',
+                                        color: '#1c2b22',
+                                        background: 'white',
+                                        cursor: 'pointer',
+                                        outline: 'none',
+                                      }}
+                                    >
+                                      <option value="">— {t('settings.no_price_var')} —</option>
+                                      <option value="{received_installment}">{t('settings.var_received')}</option>
+                                      <option value="{lease_installment}">{t('settings.var_lease')}</option>
+                                      <option value="{deposit}">{t('settings.var_deposit')}</option>
+                                      <option value="{annual_insurance_cost}">{t('settings.var_insurance')}</option>
+                                    </select>
+                                    <ChevronDown size={12} strokeWidth={1.5} style={{
+                                      position: 'absolute',
+                                      right: '8px',
+                                      top: '50%',
+                                      transform: 'translateY(-50%)',
+                                      pointerEvents: 'none',
+                                      color: '#6b8f75',
+                                    }} />
+                                  </div>
                                 </div>
                               )}
                             </div>
