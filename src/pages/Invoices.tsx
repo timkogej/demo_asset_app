@@ -162,10 +162,6 @@ function isIOS(): boolean {
   return /iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
-function isSafariBrowser(): boolean {
-  const ua = navigator.userAgent;
-  return /Safari/i.test(ua) && !/Chrome|CriOS|FxiOS|EdgiOS|OPiOS/i.test(ua);
-}
 
 function MobilePdfFallback({ pdfUrl, t }: { pdfUrl: string; t: (k: string) => string }) {
   return (
