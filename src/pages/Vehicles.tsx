@@ -509,6 +509,18 @@ function VehicleFormContent({
         </div>
       )}
 
+      {/* ── Datum pogodbe (always visible for PROPRIETA') ── */}
+      {!isLeasing && (
+        <div>
+          <div className="grid grid-cols-2 gap-3 p-3 rounded-10 bg-accent-soft/40 border border-accent-muted">
+            <div className="col-span-2">
+              <label className="label">{t('veh.contract_date')}</label>
+              <input type="date" className="input-field" value={form.contract_date} onChange={upd('contract_date')} />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Assicurazione ── */}
       <div>
         <h4 className="text-sm font-semibold text-text-dark mb-3 pb-2 border-b border-accent-soft">
@@ -809,6 +821,7 @@ function VehicleDetailModal({ vehicle, t, onClose, onEdit }: VehicleDetailModalP
                 {[
                   [t('veh.leasing_company'), vehicle.leasing_company],
                   [t('veh.contract_number'), vehicle.contract_number],
+                  [t('veh.contract_date'), vehicle.contract_date ? formatDate(vehicle.contract_date) : null],
                   [t('veh.lease_installment'), formatCurrency(vehicle.lease_installment)],
                   [t('veh.received_installment'), formatCurrency(vehicle.received_installment)],
                   [t('veh.lease_months'), vehicle.lease_months ? `${vehicle.lease_months} ${t('common.months')}` : '—'],
@@ -820,6 +833,14 @@ function VehicleDetailModal({ vehicle, t, onClose, onEdit }: VehicleDetailModalP
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Contract date — always visible for PROPRIETA' */}
+          {!isLeasing && (
+            <div className="rounded-10 border border-accent-muted p-4" style={{ backgroundColor: 'var(--color-accent-soft)' }}>
+              <p className="text-xs text-text-muted">{t('veh.contract_date')}</p>
+              <p className="text-sm font-medium text-text-dark">{vehicle.contract_date ? formatDate(vehicle.contract_date) : '—'}</p>
             </div>
           )}
 
