@@ -487,16 +487,6 @@ export async function generateInvoicePDF(
 
   const tableEndY = (doc as any).lastAutoTable.finalY;
 
-  if (isCancelled) {
-    const stornoY = tableEndY + 6;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(180, 0, 0);
-    doc.text('Racun je storniran.', marginL, stornoY);
-    doc.setTextColor(0, 0, 0);
-    doc.setFont('helvetica', 'normal');
-  }
-
   // ─── TOTALS (right) ──────────────────────────────────────────────────────
   const totalsX = 140;
   y = tableEndY + 5;
@@ -528,6 +518,15 @@ export async function generateInvoicePDF(
   doc.text(bi('SKUPAJ'), totalsX, y);
   doc.text(`${formatCurrency(displayTotal)} EUR`, marginR, y, { align: 'right' });
   doc.setFont('helvetica', 'normal');
+
+  if (isCancelled) {
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(180, 0, 0);
+    doc.text('Racun je storniran.', marginR, y + 7, { align: 'right' });
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'normal');
+  }
 
   // ─── PAYMENT INFO (left, aligned with totals) ─────────────────────────────
   const payStartY = tableEndY + 5;
@@ -600,7 +599,7 @@ export async function generateInvoicePDF(
     doc.setTextColor(200, 0, 0);
     doc.setFontSize(80);
     doc.setFont('helvetica', 'bold');
-    doc.text('STORNO', 210 / 2, 297 / 2, { align: 'center', angle: 45 });
+    doc.text('STORNO', 125, 160, { align: 'center', angle: 45 });
     doc.restoreGraphicsState();
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(8);
