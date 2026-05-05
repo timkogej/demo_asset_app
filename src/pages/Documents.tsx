@@ -287,15 +287,11 @@ export default function Documents({ t }: DocumentsProps) {
         .upload(filePath, uploadFile, { contentType: uploadFile.type, upsert: false });
       if (uploadError) throw uploadError;
 
-      const { data: signedData } = await supabase.storage
-        .from('vehicle-documents')
-        .createSignedUrl(filePath, 365 * 24 * 60 * 60);
-
       const { error: dbError } = await supabase.from('vehicle_files').insert({
         vehicle_id: uploadVehicleId || null,
         file_name: uploadFile.name,
         file_path: filePath,
-        file_url: signedData?.signedUrl || '',
+        file_url: '',
         file_size: uploadFile.size,
         file_type: uploadFile.type,
         category: uploadCategory,
@@ -338,6 +334,17 @@ export default function Documents({ t }: DocumentsProps) {
     } catch {
       toast.error(t('error.generic'));
     }
+  }
+
+  async function handleDownload(file: VehicleFile) {
+    const { data, error } = await supabase.storage
+      .from('vehicle-documents')
+      .createSignedUrl(file.file_path, 3600);
+    if (error || !data?.signedUrl) {
+      toast.error(t('error.generic'));
+      return;
+    }
+    window.open(data.signedUrl, '_blank');
   }
 
   async function handleDeleteFile(file: VehicleFile) {
@@ -678,16 +685,14 @@ export default function Documents({ t }: DocumentsProps) {
                       >
                         <Eye size={15} strokeWidth={1.8} />
                       </button>
-                      <a
-                        href={file.file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
                         title={t('doc.download')}
                         className="p-1.5 rounded-10 hover:bg-accent-soft transition-colors"
                         style={{ color: 'var(--color-accent)' }}
+                        onClick={() => handleDownload(file)}
                       >
                         <Download size={15} strokeWidth={1.8} />
-                      </a>
+                      </button>
                       <button
                         title={t('doc.delete')}
                         className="p-1.5 rounded-10 hover:bg-accent-soft transition-colors"
