@@ -116,18 +116,20 @@ export interface Payment {
 
 export interface VehicleFile {
   id: string;
-  vehicle_id: string;
+  vehicle_id: string | null;
   file_name: string;
   file_path: string;
   file_url: string;
   file_size: number;
   file_type: string;
   category: string;
+  description?: string | null;
   uploaded_at: string;
   vehicle?: {
+    id?: string;
     registration_number: string;
     vehicle_name: string | null;
-  };
+  } | null;
 }
 
 export interface InvoiceCode {

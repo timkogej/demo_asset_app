@@ -6,12 +6,15 @@ import {
   Trash2,
   FileText,
   Image,
-  FileType,
   File,
   ChevronDown,
+  Eye,
+  Loader,
+  X,
+  Search,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { supabase, uploadVehicleFile, deleteVehicleFile } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import type { Vehicle, VehicleFile } from '../types';
 
 interface DocumentsProps {
@@ -26,18 +29,9 @@ const CATEGORIES = [
   'inspection',
   'contract',
   'damage',
+  'invoice',
   'other',
 ] as const;
-
-const ALLOWED_TYPES = [
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-];
-
-const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
 const CATEGORY_COLORS: Record<string, string> = {
   green_card: '#2d7a4f',
@@ -46,6 +40,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   inspection: '#d4a017',
   contract: '#8b5cf6',
   damage: '#c0392b',
+  invoice: '#0891b2',
   other: '#6b8f75',
 };
 
@@ -65,8 +60,6 @@ function FileIcon({ mimeType }: { mimeType: string }) {
     return <FileText size={16} strokeWidth={1.8} style={{ color: 'var(--color-primary)' }} />;
   if (mimeType.startsWith('image/'))
     return <Image size={16} strokeWidth={1.8} style={{ color: 'var(--color-accent)' }} />;
-  if (mimeType.includes('word'))
-    return <FileType size={16} strokeWidth={1.8} style={{ color: '#3b82f6' }} />;
   return <File size={16} strokeWidth={1.8} style={{ color: 'var(--color-text-muted)' }} />;
 }
 
@@ -97,7 +90,7 @@ function VehicleSearchSelect({ value, onChange, vehicles, t }: {
   const selected = vehicles.find((v) => v.id === value);
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', minWidth: '260px' }}>
+    <div ref={containerRef} style={{ position: 'relative', minWidth: '220px' }}>
       <div
         onClick={() => setOpen(!open)}
         style={{
@@ -130,7 +123,7 @@ function VehicleSearchSelect({ value, onChange, vehicles, t }: {
           border: '1px solid #a8d4b3',
           borderRadius: '8px',
           boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-          minWidth: '300px',
+          minWidth: '280px',
           maxHeight: '280px',
           overflowY: 'auto',
           marginTop: '4px',
@@ -197,24 +190,31 @@ function VehicleSearchSelect({ value, onChange, vehicles, t }: {
 export default function Documents({ t }: DocumentsProps) {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [files, setFiles] = useState<VehicleFile[]>([]);
-  const [selectedVehicleId, setSelectedVehicleId] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
-  // Upload area state
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<string>('other');
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [sizeError, setSizeError] = useState('');
-  const [dragging, setDragging] = useState(false);
+  // Filter state
+  const [filterVehicleId, setFilterVehicleId] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Delete confirm state: fileId → true means confirming
-  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  // Upload panel state
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadVehicleId, setUploadVehicleId] = useState<string | null>(null);
+  const [uploadCategory, setUploadCategory] = useState('other');
+  const [uploadDescription, setUploadDescription] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [catSelectOpen, setCatSelectOpen] = useState(false);
+
+  // Preview state
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewFile, setPreviewFile] = useState<VehicleFile | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const catSelectRef = useRef<HTMLDivElement>(null);
 
-  // Fetch vehicles once
   useEffect(() => {
     supabase
       .from('vehicles')
@@ -223,15 +223,14 @@ export default function Documents({ t }: DocumentsProps) {
       .then(({ data }) => setVehicles((data as Vehicle[]) ?? []));
   }, []);
 
-  // Fetch files when vehicle selection changes
   const fetchFiles = useCallback(async () => {
     setLoading(true);
     try {
       let query = supabase
         .from('vehicle_files')
-        .select('*, vehicle:vehicles(registration_number, vehicle_name)')
+        .select('*, vehicle:vehicles(id, registration_number, vehicle_name)')
         .order('uploaded_at', { ascending: false });
-      if (selectedVehicleId) query = query.eq('vehicle_id', selectedVehicleId);
+      if (filterVehicleId) query = query.eq('vehicle_id', filterVehicleId);
       const { data, error } = await query;
       if (error) throw error;
       setFiles((data as VehicleFile[]) ?? []);
@@ -240,216 +239,356 @@ export default function Documents({ t }: DocumentsProps) {
     } finally {
       setLoading(false);
     }
-  }, [selectedVehicleId, t]);
+  }, [filterVehicleId, t]);
 
   useEffect(() => {
     fetchFiles();
   }, [fetchFiles]);
 
-  // Derived stats
-  const totalSize = files.reduce((s, f) => s + f.file_size, 0);
-  const lastUploaded = files[0]?.uploaded_at ?? null;
-
-  // File validation
-  function validateFile(file: File): string {
-    if (file.size > MAX_SIZE) return `${t('doc.upload')} — max 10 MB`;
-    if (!ALLOWED_TYPES.includes(file.type)) return 'Tipo file non supportato';
-    return '';
-  }
-
-  function handleFilePick(file: File) {
-    setSizeError('');
-    const err = validateFile(file);
-    if (err) {
-      setSizeError(err);
-      return;
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (catSelectRef.current && !catSelectRef.current.contains(e.target as Node)) {
+        setCatSelectOpen(false);
+      }
     }
-    setPendingFile(file);
-  }
+    if (catSelectOpen) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [catSelectOpen]);
 
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFilePick(file);
-  }
+  const filteredFiles = files.filter((f) => {
+    if (filterCategory && f.category !== filterCategory) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      if (
+        !f.file_name.toLowerCase().includes(q) &&
+        !(f.description ?? '').toLowerCase().includes(q)
+      ) return false;
+    }
+    return true;
+  });
+
+  const totalSize = filteredFiles.reduce((s, f) => s + f.file_size, 0);
 
   async function handleUpload() {
-    if (!pendingFile || !selectedVehicleId) return;
+    if (!uploadFile) return;
+    if (uploadFile.size > 10 * 1024 * 1024) {
+      toast.error(t('doc.file_too_large'));
+      return;
+    }
     setUploading(true);
-    setUploadProgress(30);
     try {
-      const { path, url } = await uploadVehicleFile(selectedVehicleId, pendingFile, selectedCategory);
-      setUploadProgress(70);
-      const { error } = await supabase.from('vehicle_files').insert({
-        vehicle_id: selectedVehicleId,
-        file_name: pendingFile.name,
-        file_path: path,
-        file_url: url,
-        file_size: pendingFile.size,
-        file_type: pendingFile.type,
-        category: selectedCategory,
+      const timestamp = Date.now();
+      const safeName = uploadFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const folder = uploadVehicleId || 'general';
+      const filePath = `${folder}/${timestamp}_${safeName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('vehicle-documents')
+        .upload(filePath, uploadFile, { contentType: uploadFile.type, upsert: false });
+      if (uploadError) throw uploadError;
+
+      const { data: signedData } = await supabase.storage
+        .from('vehicle-documents')
+        .createSignedUrl(filePath, 365 * 24 * 60 * 60);
+
+      const { error: dbError } = await supabase.from('vehicle_files').insert({
+        vehicle_id: uploadVehicleId || null,
+        file_name: uploadFile.name,
+        file_path: filePath,
+        file_url: signedData?.signedUrl || '',
+        file_size: uploadFile.size,
+        file_type: uploadFile.type,
+        category: uploadCategory,
+        description: uploadDescription || null,
       });
-      if (error) throw error;
-      setUploadProgress(100);
+      if (dbError) throw dbError;
+
       toast.success(t('doc.upload_success'));
-      setPendingFile(null);
+      setUploadFile(null);
+      setUploadDescription('');
+      setUploadVehicleId(null);
+      setUploadCategory('other');
       setUploadOpen(false);
-      setUploadProgress(0);
       fetchFiles();
-    } catch {
-      toast.error(t('error.save_failed'));
-      setUploadProgress(0);
+    } catch (err: unknown) {
+      console.error(err);
+      toast.error(t('error.generic'));
     } finally {
       setUploading(false);
     }
   }
 
-  async function handleDelete(file: VehicleFile) {
+  async function handlePreview(file: VehicleFile) {
     try {
-      await deleteVehicleFile(file.file_path);
-      await supabase.from('vehicle_files').delete().eq('id', file.id);
-      setConfirmingDelete(null);
-      setFiles((prev) => prev.filter((f) => f.id !== file.id));
-      toast.success(t('doc.delete_success'));
+      const { data, error } = await supabase.storage
+        .from('vehicle-documents')
+        .createSignedUrl(file.file_path, 3600);
+      if (error || !data?.signedUrl) throw error;
+
+      const isPDF = file.file_type === 'application/pdf';
+      const isImage = file.file_type?.startsWith('image/');
+
+      if (isPDF || isImage) {
+        setPreviewUrl(data.signedUrl);
+        setPreviewFile(file);
+        setShowPreview(true);
+      } else {
+        window.open(data.signedUrl, '_blank');
+      }
     } catch {
-      toast.error(t('error.delete_failed'));
+      toast.error(t('error.generic'));
     }
   }
 
-  const showUploadButton = !!selectedVehicleId;
+  async function handleDeleteFile(file: VehicleFile) {
+    if (!window.confirm(t('doc.confirm_delete'))) return;
+    try {
+      await supabase.storage.from('vehicle-documents').remove([file.file_path]);
+      await supabase.from('vehicle_files').delete().eq('id', file.id);
+      toast.success(t('doc.delete_success'));
+      fetchFiles();
+    } catch {
+      toast.error(t('error.generic'));
+    }
+  }
 
   return (
     <div className="p-6 max-w-full">
       {/* Top bar */}
       <div className="flex items-center justify-between gap-4 mb-4">
         <h1 className="page-title">{t('doc.title')}</h1>
-        <div className="flex items-center gap-3 flex-shrink-0">
-          <VehicleSearchSelect
-            value={selectedVehicleId}
-            onChange={(id) => {
-              setSelectedVehicleId(id);
-              setUploadOpen(false);
-              setPendingFile(null);
-            }}
-            vehicles={vehicles}
-            t={t}
-          />
-
-          {showUploadButton && (
-            <button
-              className="btn-primary flex items-center gap-2 text-sm py-1.5 px-4"
-              onClick={() => {
-                setUploadOpen((o) => !o);
-                setPendingFile(null);
-                setSizeError('');
-              }}
-            >
-              <Upload size={15} strokeWidth={1.8} />
-              {t('doc.upload')}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Upload area */}
-      {showUploadButton && uploadOpen && (
-        <div
-          className="mb-4 rounded-10 border border-dashed transition-colors duration-150"
-          style={{
-            borderColor: dragging ? 'var(--color-accent)' : 'var(--color-accent-muted)',
-            backgroundColor: dragging ? 'var(--color-accent-soft)' : 'transparent',
-            padding: '12px 16px',
+        <button
+          className="btn-primary flex items-center gap-2 text-sm py-1.5 px-4"
+          onClick={() => {
+            setUploadOpen((o) => !o);
+            setUploadFile(null);
+            setUploadDescription('');
           }}
         >
-          {!pendingFile ? (
-            <div
-              className="flex flex-col items-center justify-center cursor-pointer select-none"
-              style={{ minHeight: 72 }}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={handleDrop}
-            >
-              <Upload size={20} strokeWidth={1.8} style={{ color: 'var(--color-accent-muted)' }} />
-              <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
-                {t('doc.drop_here')}
-              </p>
-              {sizeError && <p className="text-xs mt-1 error-text">{sizeError}</p>}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleFilePick(f);
-                  e.target.value = '';
-                }}
-              />
-            </div>
-          ) : (
-            <div className="flex items-center gap-3 flex-wrap">
-              <FileIcon mimeType={pendingFile.type} />
-              <span className="text-sm font-medium text-text-dark flex-1 min-w-0 truncate">
-                {pendingFile.name}
-              </span>
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                {formatSize(pendingFile.size)}
-              </span>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="input-field text-sm py-1"
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {t(`doc.category.${c}`)}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="btn-primary text-sm py-1 px-3"
-                onClick={handleUpload}
-                disabled={uploading}
-              >
-                {uploading ? t('doc.uploading') : t('common.confirm')}
-              </button>
-              <button
-                className="btn-secondary text-sm py-1 px-3"
-                onClick={() => { setPendingFile(null); setSizeError(''); }}
-                disabled={uploading}
-              >
-                {t('btn.cancel')}
-              </button>
-            </div>
-          )}
+          <Upload size={15} strokeWidth={1.8} />
+          {t('doc.upload_btn')}
+        </button>
+      </div>
 
-          {/* Progress bar */}
-          {uploading && uploadProgress > 0 && (
-            <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ background: 'var(--color-accent-soft)' }}>
+      {/* Upload panel */}
+      {uploadOpen && (
+        <div className="card mb-4 p-5">
+          {/* Drag & drop area */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const file = e.dataTransfer.files[0];
+              if (file) setUploadFile(file);
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              border: `2px dashed ${dragOver ? '#1a4731' : '#a8d4b3'}`,
+              borderRadius: '10px',
+              padding: '32px',
+              textAlign: 'center',
+              cursor: 'pointer',
+              background: dragOver ? '#f0fdf4' : '#f8faf8',
+              transition: 'all 0.2s',
+            }}
+          >
+            <Upload size={32} strokeWidth={1.5} color="#6b8f75" />
+            <p style={{ margin: '8px 0 4px', fontWeight: '600', color: '#1c2b22' }}>
+              {uploadFile ? uploadFile.name : t('doc.drag_or_click')}
+            </p>
+            <p style={{ margin: 0, fontSize: '12px', color: '#6b8f75' }}>
+              PDF, JPG, PNG, DOCX, XLSX — max 10MB
+            </p>
+            {uploadFile && (
+              <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#1a4731', fontWeight: '600' }}>
+                {(uploadFile.size / 1024 / 1024).toFixed(2)} MB
+              </p>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png,.docx,.doc,.xlsx"
+            style={{ display: 'none' }}
+            onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+          />
+
+          {/* Form fields */}
+          <div className="flex flex-wrap items-center gap-3 mt-4">
+            {/* Vehicle (optional) */}
+            <VehicleSearchSelect
+              value={uploadVehicleId || ''}
+              onChange={(id) => setUploadVehicleId(id || null)}
+              vehicles={vehicles}
+              t={t}
+            />
+
+            {/* Category styled select */}
+            <div ref={catSelectRef} style={{ position: 'relative', minWidth: '180px' }}>
               <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{ width: `${uploadProgress}%`, background: 'var(--color-accent)' }}
-              />
+                onClick={() => setCatSelectOpen((o) => !o)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '6px 12px',
+                  border: '1px solid #a8d4b3',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  background: 'white',
+                  fontSize: '13px',
+                  color: '#1c2b22',
+                }}
+              >
+                <span>{t(`doc.cat_${uploadCategory}`)}</span>
+                <ChevronDown size={14} strokeWidth={1.5} color="#6b8f75" style={{ marginLeft: 6, flexShrink: 0 }} />
+              </div>
+              {catSelectOpen && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  zIndex: 9999,
+                  background: 'white',
+                  border: '1px solid #a8d4b3',
+                  borderRadius: '8px',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                  minWidth: '180px',
+                  marginTop: '4px',
+                  overflow: 'hidden',
+                }}>
+                  {CATEGORIES.map((c) => (
+                    <div
+                      key={c}
+                      onMouseDown={() => { setUploadCategory(c); setCatSelectOpen(false); }}
+                      style={{
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                        background: uploadCategory === c ? '#f0fdf4' : 'white',
+                        color: '#1c2b22',
+                        borderBottom: '1px solid #f8f8f8',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = '#f0fdf4')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = uploadCategory === c ? '#f0fdf4' : 'white')}
+                    >
+                      {t(`doc.cat_${c}`)}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+
+            {/* Description */}
+            <input
+              value={uploadDescription}
+              onChange={(e) => setUploadDescription(e.target.value)}
+              placeholder={t('doc.description')}
+              className="input-field text-sm py-1"
+              style={{ flex: 1, minWidth: '180px' }}
+            />
+
+            {/* Upload button */}
+            <button
+              onClick={handleUpload}
+              disabled={uploading || !uploadFile}
+              style={{
+                background: uploading || !uploadFile ? '#a8d4b3' : '#1a4731',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '10px 24px',
+                cursor: uploading || !uploadFile ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontWeight: '600',
+                fontSize: '13px',
+                flexShrink: 0,
+              }}
+            >
+              {uploading
+                ? <Loader size={14} strokeWidth={1.5} />
+                : <Upload size={14} strokeWidth={1.5} />}
+              {uploading ? t('doc.uploading') : t('doc.upload_btn')}
+            </button>
+          </div>
         </div>
       )}
+
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <VehicleSearchSelect
+          value={filterVehicleId}
+          onChange={setFilterVehicleId}
+          vehicles={vehicles}
+          t={t}
+        />
+
+        {/* Category pills */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <button
+            onClick={() => setFilterCategory('')}
+            style={{
+              fontSize: '12px',
+              padding: '4px 12px',
+              borderRadius: '999px',
+              border: `1px solid ${!filterCategory ? '#1a4731' : '#a8d4b3'}`,
+              background: !filterCategory ? '#f0fdf4' : 'white',
+              color: !filterCategory ? '#1a4731' : '#6b8f75',
+              fontWeight: !filterCategory ? '600' : '400',
+              cursor: 'pointer',
+            }}
+          >
+            {t('doc.all_categories')}
+          </button>
+          {CATEGORIES.map((c) => (
+            <button
+              key={c}
+              onClick={() => setFilterCategory(filterCategory === c ? '' : c)}
+              style={{
+                fontSize: '12px',
+                padding: '4px 12px',
+                borderRadius: '999px',
+                border: `1px solid ${filterCategory === c ? CATEGORY_COLORS[c] : '#a8d4b3'}`,
+                background: filterCategory === c ? `${CATEGORY_COLORS[c]}18` : 'white',
+                color: filterCategory === c ? CATEGORY_COLORS[c] : '#6b8f75',
+                fontWeight: filterCategory === c ? '600' : '400',
+                cursor: 'pointer',
+              }}
+            >
+              {t(`doc.cat_${c}`)}
+            </button>
+          ))}
+        </div>
+
+        {/* Search */}
+        <div style={{ position: 'relative', marginLeft: 'auto' }}>
+          <Search
+            size={13}
+            strokeWidth={1.5}
+            style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#6b8f75', pointerEvents: 'none' }}
+          />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t('doc.search_files')}
+            className="input-field text-sm py-1"
+            style={{ paddingLeft: '30px', minWidth: '180px' }}
+          />
+        </div>
+      </div>
 
       {/* Stats mini-row */}
       <div className="flex items-center gap-6 mb-4">
         <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-          <span className="font-semibold text-text-dark">{files.length}</span> file
+          <span className="font-semibold text-text-dark">{filteredFiles.length}</span> file
         </span>
         <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           <span className="font-semibold text-text-dark">{formatSize(totalSize)}</span> totale
         </span>
-        {lastUploaded && (
-          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            Ultimo: <span className="font-semibold text-text-dark">{formatDate(lastUploaded)}</span>
-          </span>
-        )}
       </div>
 
       {/* Table */}
@@ -457,7 +596,7 @@ export default function Documents({ t }: DocumentsProps) {
         <div className="flex justify-center py-12">
           <div className="spinner" />
         </div>
-      ) : files.length === 0 ? (
+      ) : filteredFiles.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 gap-3">
           <FolderOpen size={48} strokeWidth={1.4} style={{ color: 'var(--color-accent-muted)' }} />
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
@@ -471,41 +610,35 @@ export default function Documents({ t }: DocumentsProps) {
               <tr className="border-b" style={{ borderColor: 'var(--color-accent-soft)' }}>
                 <th className="table-header w-8"></th>
                 <th className="table-header text-left">{t('doc.file_name')}</th>
+                <th className="table-header text-left">{t('vehicles.plate')}</th>
                 <th className="table-header text-left">{t('doc.category_label')}</th>
-                {!selectedVehicleId && (
-                  <th className="table-header text-left">{t('vehicles.plate')}</th>
-                )}
+                <th className="table-header text-left">{t('doc.description')}</th>
                 <th className="table-header text-left">{t('doc.file_size')}</th>
                 <th className="table-header text-left">{t('doc.uploaded_at')}</th>
                 <th className="table-header text-right">{t('vehicles.actions')}</th>
               </tr>
             </thead>
             <tbody>
-              {files.map((file) => (
+              {filteredFiles.map((file) => (
                 <tr
                   key={file.id}
                   className="table-row border-b"
                   style={{ height: 40, borderColor: 'var(--color-accent-soft)' }}
                 >
-                  {/* Type icon */}
                   <td className="table-cell w-8 pr-0">
                     <FileIcon mimeType={file.file_type} />
                   </td>
 
-                  {/* File name */}
                   <td className="table-cell max-w-[200px]">
-                    <span
-                      title={file.file_name}
-                      className="truncate block"
-                      style={{ maxWidth: 220 }}
-                    >
-                      {file.file_name.length > 28
-                        ? file.file_name.slice(0, 28) + '…'
-                        : file.file_name}
+                    <span title={file.file_name} className="truncate block" style={{ maxWidth: 220 }}>
+                      {file.file_name.length > 28 ? file.file_name.slice(0, 28) + '…' : file.file_name}
                     </span>
                   </td>
 
-                  {/* Category badge */}
+                  <td className="table-cell text-xs font-mono">
+                    {file.vehicle?.registration_number ?? '—'}
+                  </td>
+
                   <td className="table-cell">
                     <span
                       className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded"
@@ -519,75 +652,116 @@ export default function Documents({ t }: DocumentsProps) {
                     </span>
                   </td>
 
-                  {/* Vehicle plate (all-vehicles view) */}
-                  {!selectedVehicleId && (
-                    <td className="table-cell text-xs font-mono">
-                      {file.vehicle?.registration_number ?? '—'}
-                    </td>
-                  )}
+                  <td className="table-cell text-xs" style={{ color: 'var(--color-text-muted)', maxWidth: '180px' }}>
+                    <span className="truncate block" style={{ maxWidth: 180 }}>
+                      {file.description ?? ''}
+                    </span>
+                  </td>
 
-                  {/* Size */}
                   <td className="table-cell text-xs" style={{ color: 'var(--color-text-muted)' }}>
                     {formatSize(file.file_size)}
                   </td>
 
-                  {/* Date */}
                   <td className="table-cell text-xs" style={{ color: 'var(--color-text-muted)' }}>
                     {formatDate(file.uploaded_at)}
                   </td>
 
-                  {/* Actions */}
                   <td className="table-cell text-right">
-                    {confirmingDelete === file.id ? (
-                      <span className="flex items-center justify-end gap-2">
-                        <button
-                          className="text-xs font-medium"
-                          style={{ color: 'var(--color-danger)' }}
-                          onClick={() => handleDelete(file)}
-                        >
-                          {t('common.confirm')}
-                        </button>
-                        <button
-                          className="text-xs"
-                          style={{ color: 'var(--color-text-muted)' }}
-                          onClick={() => setConfirmingDelete(null)}
-                        >
-                          {t('btn.cancel')}
-                        </button>
-                      </span>
-                    ) : (
-                      <span className="flex items-center justify-end gap-1">
-                        <a
-                          href={file.file_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={t('doc.download')}
-                          className="p-1.5 rounded-10 hover:bg-accent-soft transition-colors"
-                          style={{ color: 'var(--color-accent)' }}
-                        >
-                          <Download size={15} strokeWidth={1.8} />
-                        </a>
-                        <button
-                          title={t('doc.delete')}
-                          className="p-1.5 rounded-10 hover:bg-accent-soft transition-colors"
-                          style={{ color: 'var(--color-text-muted)' }}
-                          onMouseEnter={(e) =>
-                            (e.currentTarget.style.color = 'var(--color-danger)')
-                          }
-                          onMouseLeave={(e) =>
-                            (e.currentTarget.style.color = 'var(--color-text-muted)')
-                          }
-                          onClick={() => setConfirmingDelete(file.id)}
-                        >
-                          <Trash2 size={15} strokeWidth={1.8} />
-                        </button>
-                      </span>
-                    )}
+                    <span className="flex items-center justify-end gap-1">
+                      <button
+                        title={t('doc.preview')}
+                        className="p-1.5 rounded-10 hover:bg-accent-soft transition-colors"
+                        style={{ color: 'var(--color-text-muted)' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-primary)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
+                        onClick={() => handlePreview(file)}
+                      >
+                        <Eye size={15} strokeWidth={1.8} />
+                      </button>
+                      <a
+                        href={file.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={t('doc.download')}
+                        className="p-1.5 rounded-10 hover:bg-accent-soft transition-colors"
+                        style={{ color: 'var(--color-accent)' }}
+                      >
+                        <Download size={15} strokeWidth={1.8} />
+                      </a>
+                      <button
+                        title={t('doc.delete')}
+                        className="p-1.5 rounded-10 hover:bg-accent-soft transition-colors"
+                        style={{ color: 'var(--color-text-muted)' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-danger)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
+                        onClick={() => handleDeleteFile(file)}
+                      >
+                        <Trash2 size={15} strokeWidth={1.8} />
+                      </button>
+                    </span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Preview modal */}
+      {showPreview && previewFile && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.6)',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '24px',
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            width: '100%',
+            maxWidth: '860px',
+            maxHeight: '90vh',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '16px 20px',
+              borderBottom: '1px solid #d4ead9',
+            }}>
+              <span style={{ fontWeight: '600', color: '#1c2b22', fontSize: '14px' }}>
+                {previewFile.file_name}
+              </span>
+              <button
+                onClick={() => setShowPreview(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+              >
+                <X size={20} strokeWidth={1.5} color="#6b8f75" />
+              </button>
+            </div>
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              {previewFile.file_type === 'application/pdf' ? (
+                <iframe
+                  src={previewUrl}
+                  style={{ width: '100%', height: '75vh', border: 'none' }}
+                  title={previewFile.file_name}
+                />
+              ) : previewFile.file_type?.startsWith('image/') ? (
+                <img
+                  src={previewUrl}
+                  alt={previewFile.file_name}
+                  style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain', display: 'block', margin: '0 auto' }}
+                />
+              ) : null}
+            </div>
+          </div>
         </div>
       )}
     </div>
