@@ -44,10 +44,9 @@ function formatDateIT(dateStr: string | null | undefined): string {
 }
 
 function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('it-IT', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount || 0);
+  const abs = Math.abs(amount || 0);
+  const formatted = abs.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return amount < 0 ? `-${formatted}` : formatted;
 }
 
 // ─── LOGO FETCHING ───────────────────────────────────────────────────────────
@@ -391,8 +390,8 @@ export async function generateInvoicePDF(
         { content: '' },
         { content: deepSanitize(item.description), styles: { fontSize: 7.5 } },
         { content: item.quantity === 1 ? '1' : String(item.quantity || 0) },
-        { content: item.unit_price > 0 ? `${formatCurrency(item.unit_price)} EUR` : '' },
-        { content: item.total > 0 ? `${formatCurrency(item.total)} EUR` : '' },
+        { content: item.unit_price !== 0 ? `${formatCurrency(item.unit_price)} EUR` : '' },
+        { content: item.total !== 0 ? `${formatCurrency(item.total)} EUR` : '' },
       ]);
       continue;
     }
@@ -429,8 +428,8 @@ export async function generateInvoicePDF(
         { content: '' },
         descContent,
         { content: item.quantity === 1 ? '1' : (item.quantity || 0).toString() },
-        { content: item.unit_price > 0 ? `${formatCurrency(item.unit_price)} EUR` : '' },
-        { content: item.total > 0 ? `${formatCurrency(item.total)} EUR` : '' },
+        { content: item.unit_price !== 0 ? `${formatCurrency(item.unit_price)} EUR` : '' },
+        { content: item.total !== 0 ? `${formatCurrency(item.total)} EUR` : '' },
       ]);
     }
   }

@@ -534,6 +534,14 @@ export default function Invoices({ t, language }: InvoicesProps) {
   // leave confirmation
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
+  // Remove spinner arrows from price inputs
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `.no-spinner::-webkit-inner-spin-button,.no-spinner::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}.no-spinner{-moz-appearance:textfield;appearance:textfield}`;
+    document.head.appendChild(style);
+    return () => { document.head.removeChild(style); };
+  }, []);
+
   // ---- fetch ----
 
   const fetchInvoices = useCallback(async () => {
@@ -2691,7 +2699,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
                                     ...f,
                                     items: f.items.map((i) => i.id === item.id ? { ...i, unit_price: Number(e.target.value) } : i),
                                   }))}
-                                  className="input-field py-1 text-sm text-right w-full"
+                                  className="input-field py-1 text-sm text-right w-full no-spinner"
                                 />
                               ) : <span className="text-xs text-text-muted text-right block">—</span>}
                             </td>
