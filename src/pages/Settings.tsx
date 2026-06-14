@@ -8,11 +8,15 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronRight,
+  Bell,
+  Users,
+  FileText,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import { clearSettingsCache } from '../lib/settings';
-import type { Language, Settings, InvoiceTemplate, InvoiceTemplateLine, InvoiceType } from '../types';
+import type { Language, Settings, InvoiceTemplate, InvoiceTemplateLine, InvoiceType, ReminderTemplate } from '../types';
 import { TEMPLATE_VARIABLES } from '../lib/invoiceVariables';
 
 interface SettingsProps {
@@ -20,9 +24,49 @@ interface SettingsProps {
   language: Language;
 }
 
-type SectionKey = 'company' | 'banking' | 'invoices' | 'email' | 'templates';
+type SectionKey = 'company' | 'banking' | 'invoices' | 'email' | 'templates' | 'reminders' | 'export';
 
 const COUNTRIES = ['SI', 'IT', 'HR', 'DE', 'AT', 'FR', 'HU', 'RO', 'SK', 'CZ'];
+
+const EXPORT_YEARS = [2024, 2025, 2026];
+
+const EXPORT_MONTHS: Record<Language, string[]> = {
+  sl: ['Januar', 'Februar', 'Marec', 'April', 'Maj', 'Junij', 'Julij', 'Avgust', 'September', 'Oktober', 'November', 'December'],
+  it: ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'],
+};
+
+// --- Excel export helpers (accounting) ---
+function exportToExcel<T extends Record<string, unknown>>(
+  data: T[],
+  columns: { key: keyof T; header: string }[],
+  filename: string,
+) {
+  const rows = data.map((row) => {
+    const obj: Record<string, unknown> = {};
+    columns.forEach((col) => {
+      obj[col.header] = row[col.key];
+    });
+    return obj;
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+  XLSX.writeFile(wb, filename);
+}
+
+// DD.MM.YYYY from an ISO date string (e.g. "2026-05-01")
+function formatExportDate(isoDate: string): string {
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}.${mm}.${d.getFullYear()}`;
+}
+
+// 2 decimal places, kept as a numeric value for Excel
+function toMoney(value: number | null): number {
+  return Number((value ?? 0).toFixed(2));
+}
 
 function SectionHeader({
   title,
@@ -133,7 +177,7 @@ function VariableAutocomplete({
 }
 
 export default function Settings({ t, language }: SettingsProps) {
-  const [openSection, setOpenSection] = useState<SectionKey>('company');
+  const [openSection, setOpenSection] = useState<SectionKey | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -150,6 +194,18 @@ export default function Settings({ t, language }: SettingsProps) {
   const [activeTemplateType, setActiveTemplateType] = useState<InvoiceType>('monthly_rent');
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [expandedVars, setExpandedVars] = useState(false);
+
+  // Reminder templates state
+  const [reminderTemplates, setReminderTemplates] = useState<ReminderTemplate[]>([]);
+  const [savingReminderLevel, setSavingReminderLevel] = useState<number | null>(null);
+  const [savingSmsSettings, setSavingSmsSettings] = useState(false);
+
+  // Accounting export state
+  const now = new Date();
+  const [exportMonth, setExportMonth] = useState<number>(now.getMonth() + 1);
+  const [exportYear, setExportYear] = useState<number>(now.getFullYear());
+  const [exportingPartners, setExportingPartners] = useState(false);
+  const [exportingInvoices, setExportingInvoices] = useState(false);
 
   const originalRef = useRef<Partial<Settings>>({});
 
@@ -218,10 +274,19 @@ export default function Settings({ t, language }: SettingsProps) {
     }
   }, []);
 
+  const loadReminderTemplates = useCallback(async () => {
+    const { data } = await supabase
+      .from('reminder_templates')
+      .select('*')
+      .order('reminder_level', { ascending: true });
+    if (data) setReminderTemplates(data as ReminderTemplate[]);
+  }, []);
+
   useEffect(() => {
     loadSettings();
     loadTemplates();
-  }, [loadSettings, loadTemplates]);
+    loadReminderTemplates();
+  }, [loadSettings, loadTemplates, loadReminderTemplates]);
 
   async function saveTemplate(template: InvoiceTemplate) {
     setSavingTemplate(true);
@@ -307,6 +372,57 @@ export default function Settings({ t, language }: SettingsProps) {
     }));
   }
 
+  function updateReminderTemplate(level: number, patch: Partial<ReminderTemplate>) {
+    setReminderTemplates((prev) =>
+      prev.map((t) => t.reminder_level === level ? { ...t, ...patch } : t)
+    );
+  }
+
+  async function saveReminderTemplate(level: number) {
+    const tmpl = reminderTemplates.find((t) => t.reminder_level === level);
+    if (!tmpl) return;
+    setSavingReminderLevel(level);
+    try {
+      const { error } = await supabase
+        .from('reminder_templates')
+        .update({
+          subject_email_it: tmpl.subject_email_it,
+          body_email_it: tmpl.body_email_it,
+          body_sms_it: tmpl.body_sms_it,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', level);
+      if (error) throw error;
+      toast.success('Predloga shranjena');
+    } catch {
+      toast.error(t('error.save_failed'));
+    } finally {
+      setSavingReminderLevel(null);
+    }
+  }
+
+  async function saveSmsSettings() {
+    setSavingSmsSettings(true);
+    try {
+      const { error } = await supabase
+        .from('settings')
+        .update({
+          sms_sender_number: form.sms_sender_number ?? null,
+          bulkgate_app_id: form.bulkgate_app_id ?? null,
+          bulkgate_app_token: form.bulkgate_app_token ?? null,
+          reminder_webhook_url: form.reminder_webhook_url ?? null,
+        })
+        .eq('id', 1);
+      if (error) throw error;
+      clearSettingsCache();
+      toast.success('SMS nastavitve shranjene');
+    } catch {
+      toast.error(t('error.save_failed'));
+    } finally {
+      setSavingSmsSettings(false);
+    }
+  }
+
   function handleChange(
     field: keyof Settings,
     value: string | number | null
@@ -317,7 +433,7 @@ export default function Settings({ t, language }: SettingsProps) {
   }
 
   function toggleSection(section: SectionKey) {
-    setOpenSection((prev) => (prev === section ? prev : section));
+    setOpenSection((prev) => (prev === section ? null : section));
   }
 
   async function handleSave() {
@@ -421,6 +537,144 @@ export default function Settings({ t, language }: SettingsProps) {
       toast.error('Webhook test failed');
     } finally {
       setTestingWebhook(false);
+    }
+  }
+
+  // --- Accounting exports ---
+  const exportPeriodSuffix = `${String(exportMonth).padStart(2, '0')}_${exportYear}`;
+  const noInvoicesMsg = language === 'sl' ? 'Ni računov za izbrani mesec' : 'Nessuna fattura per il mese selezionato';
+  const downloadedMsg = language === 'sl' ? 'Datoteka prenesena' : 'File scaricato';
+
+  async function handleExportPartners() {
+    setExportingPartners(true);
+    try {
+      const { data, error } = await supabase
+        .from('invoices')
+        .select('client_id, client:clients(id, company_name, address, city, postal_code, country, tax_number)')
+        .eq('billing_month', exportMonth)
+        .eq('billing_year_check', exportYear)
+        .neq('status', 'cancelled');
+      if (error) throw error;
+
+      type PartnerQueryRow = {
+        client_id: string | null;
+        client: {
+          id: string;
+          company_name: string | null;
+          address: string | null;
+          city: string | null;
+          postal_code: string | null;
+          country: string | null;
+          tax_number: string | null;
+        } | null;
+      };
+      const rows = (data ?? []) as unknown as PartnerQueryRow[];
+
+      if (rows.length === 0) {
+        toast.error(noInvoicesMsg);
+        return;
+      }
+
+      // Deduplicate by client_id (each partner only once)
+      const seen = new Set<string>();
+      const partners: {
+        sifra: string;
+        naziv: string;
+        naslov: string;
+        mesto: string;
+        davcna: string;
+        posta: string;
+        drzava: string;
+      }[] = [];
+      for (const row of rows) {
+        const c = row.client;
+        if (!c || !c.id || seen.has(c.id)) continue;
+        seen.add(c.id);
+        partners.push({
+          sifra: c.id,
+          naziv: c.company_name ?? '',
+          naslov: c.address ?? '',
+          mesto: c.city ?? '',
+          davcna: c.tax_number ?? '',
+          posta: c.postal_code ? `${c.country ?? ''}-${c.postal_code}` : '',
+          drzava: c.country ?? '',
+        });
+      }
+
+      exportToExcel(
+        partners,
+        [
+          { key: 'sifra', header: 'Šifra partnerja' },
+          { key: 'naziv', header: 'Naziv' },
+          { key: 'naslov', header: 'Naslov' },
+          { key: 'mesto', header: 'Mesto' },
+          { key: 'davcna', header: 'Davčna številka' },
+          { key: 'posta', header: 'Poštna številka' },
+          { key: 'drzava', header: 'Država' },
+        ],
+        `Archive1_${exportPeriodSuffix}.xlsx`,
+      );
+      toast.success(downloadedMsg);
+    } catch {
+      toast.error(t('error.fetch_failed'));
+    } finally {
+      setExportingPartners(false);
+    }
+  }
+
+  async function handleExportInvoices() {
+    setExportingInvoices(true);
+    try {
+      const { data, error } = await supabase
+        .from('invoices')
+        .select('invoice_number, invoice_date, subtotal, vat_amount, total, client_id')
+        .eq('billing_month', exportMonth)
+        .eq('billing_year_check', exportYear)
+        .neq('status', 'cancelled')
+        .order('invoice_sequence', { ascending: true });
+      if (error) throw error;
+
+      type InvoiceQueryRow = {
+        invoice_number: string;
+        invoice_date: string;
+        subtotal: number | null;
+        vat_amount: number | null;
+        total: number | null;
+        client_id: string | null;
+      };
+      const rows = (data ?? []) as unknown as InvoiceQueryRow[];
+
+      if (rows.length === 0) {
+        toast.error(noInvoicesMsg);
+        return;
+      }
+
+      const invoices = rows.map((r) => ({
+        stevilka: r.invoice_number,
+        datum: formatExportDate(r.invoice_date),
+        osnova: toMoney(r.subtotal),
+        ddv: toMoney(r.vat_amount),
+        skupaj: toMoney(r.total),
+        sifra: r.client_id ?? '',
+      }));
+
+      exportToExcel(
+        invoices,
+        [
+          { key: 'stevilka', header: 'Številka računa' },
+          { key: 'datum', header: 'Datum računa' },
+          { key: 'osnova', header: 'Osnova' },
+          { key: 'ddv', header: 'DDV' },
+          { key: 'skupaj', header: 'Skupaj' },
+          { key: 'sifra', header: 'Šifra partnerja' },
+        ],
+        `Archive2_${exportPeriodSuffix}.xlsx`,
+      );
+      toast.success(downloadedMsg);
+    } catch {
+      toast.error(t('error.fetch_failed'));
+    } finally {
+      setExportingInvoices(false);
     }
   }
 
@@ -1255,6 +1509,263 @@ export default function Settings({ t, language }: SettingsProps) {
             </div>
           );
         })()}
+
+        {/* ── SECTION 6: REMINDERS ── */}
+        <div className="card rounded-10 overflow-hidden border-l-4" style={{ borderLeftColor: '#f59e0b' }}>
+          <SectionHeader
+            title={t('rem.reminders')}
+            open={openSection === 'reminders'}
+            onToggle={() => toggleSection('reminders')}
+          />
+          {openSection === 'reminders' && (
+            <div className="px-5 pb-6 border-t border-accent-soft space-y-8">
+
+              {/* ── Del A: Predloge opomnikov ── */}
+              <div className="pt-4">
+                <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-4">
+                  Predloge opomnikov / Modelli di sollecito
+                </p>
+                <div className="space-y-4">
+                  {[1, 2, 3, 4].map((level) => {
+                    const tmpl = reminderTemplates.find((t) => t.reminder_level === level);
+                    const levelColors: Record<number, string> = {
+                      1: 'border-blue-200 bg-blue-50/40',
+                      2: 'border-amber-200 bg-amber-50/40',
+                      3: 'border-orange-200 bg-orange-50/40',
+                      4: 'border-red-200 bg-red-50/40',
+                    };
+                    const levelNames: Record<number, string> = {
+                      1: '1° Sollecito',
+                      2: '2° Sollecito',
+                      3: '3° Sollecito',
+                      4: '4° Sollecito (Finale)',
+                    };
+                    const smsLen = (tmpl?.body_sms_it ?? '').length;
+                    return (
+                      <div key={level} className={`rounded-10 border p-4 space-y-3 ${levelColors[level] ?? ''}`}>
+                        <div className="flex items-center gap-2">
+                          <Bell size={14} strokeWidth={1.8} className="text-text-muted" />
+                          <span className="text-sm font-semibold text-text-dark">{levelNames[level]}</span>
+                        </div>
+                        {tmpl ? (
+                          <>
+                            <div>
+                              <FieldLabel text="Subject emaila" />
+                              <input
+                                className="input-field w-full text-sm"
+                                value={tmpl.subject_email_it}
+                                onChange={(e) => updateReminderTemplate(level, { subject_email_it: e.target.value })}
+                                placeholder="Oggetto email..."
+                              />
+                            </div>
+                            <div>
+                              <FieldLabel text="Besedilo emaila" />
+                              <textarea
+                                className="input-field w-full text-sm resize-none"
+                                rows={6}
+                                value={tmpl.body_email_it}
+                                onChange={(e) => updateReminderTemplate(level, { body_email_it: e.target.value })}
+                                placeholder="Telo emaila..."
+                              />
+                            </div>
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <FieldLabel text="Besedilo SMS" />
+                                <span className={`text-xs font-mono ${smsLen > 160 ? 'text-red-500 font-bold' : 'text-text-muted'}`}>
+                                  {smsLen}/160 znakov
+                                </span>
+                              </div>
+                              <textarea
+                                className="input-field w-full text-sm resize-none"
+                                rows={3}
+                                value={tmpl.body_sms_it}
+                                onChange={(e) => updateReminderTemplate(level, { body_sms_it: e.target.value })}
+                                placeholder="SMS besedilo..."
+                              />
+                            </div>
+                            <div className="text-xs text-text-muted">
+                              <span className="font-medium">Razpoložljive spremenljivke:</span>{' '}
+                              {['{invoice_number}', '{service_period}', '{vehicle_name}', '{registration_number}', '{due_date}', '{client_name}', '{total}'].map((v) => (
+                                <code key={v} className="px-1 py-0.5 rounded font-mono text-[11px]" style={{ background: '#eaf4ed', color: '#1a4731', border: '1px solid #c8e0cf' }}>{v}</code>
+                              )).reduce((acc, el, i) => i === 0 ? [el] : [...acc, ' ', el], [] as React.ReactNode[])}
+                            </div>
+                            <div className="flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => saveReminderTemplate(level)}
+                                disabled={savingReminderLevel === level}
+                                className="btn-primary text-xs flex items-center gap-1"
+                              >
+                                {savingReminderLevel === level ? (
+                                  <><span className="spinner w-3 h-3" /> Shranjevanje...</>
+                                ) : (
+                                  <><Check size={13} strokeWidth={2} /> Shrani</>
+                                )}
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-xs text-text-muted italic">Predloga se nalaga...</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ── Del B: BulkGate & SMS nastavitve ── */}
+              <div>
+                <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-4">
+                  BulkGate & SMS nastavitve
+                </p>
+                <div className="space-y-4">
+                  <div>
+                    <FieldLabel text="SMS pošiljatelj (sms_sender_number)" />
+                    <input
+                      className="input-field w-full"
+                      value={form.sms_sender_number ?? ''}
+                      onChange={(e) => setForm((f) => ({ ...f, sms_sender_number: e.target.value }))}
+                      placeholder="+38640123456"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel text="BulkGate Application ID" />
+                    <input
+                      className="input-field w-full"
+                      value={form.bulkgate_app_id ?? ''}
+                      onChange={(e) => setForm((f) => ({ ...f, bulkgate_app_id: e.target.value }))}
+                      placeholder="123456"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel text="BulkGate Application Token" />
+                    <input
+                      type="password"
+                      className="input-field w-full"
+                      value={form.bulkgate_app_token ?? ''}
+                      onChange={(e) => setForm((f) => ({ ...f, bulkgate_app_token: e.target.value }))}
+                      placeholder="••••••••"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel text="Reminder Webhook URL" />
+                    <input
+                      className="input-field w-full"
+                      value={form.reminder_webhook_url ?? ''}
+                      onChange={(e) => setForm((f) => ({ ...f, reminder_webhook_url: e.target.value }))}
+                      placeholder="https://n8n.example.com/webhook/send-reminder"
+                    />
+                  </div>
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={saveSmsSettings}
+                      disabled={savingSmsSettings}
+                      className="btn-primary text-sm flex items-center gap-2"
+                    >
+                      {savingSmsSettings ? (
+                        <><span className="spinner w-4 h-4" /> Shranjevanje...</>
+                      ) : (
+                        <><Check size={14} strokeWidth={2} /> Shrani SMS nastavitve</>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          )}
+        </div>
+
+        {/* ── SECTION 7: ACCOUNTING EXPORT ── */}
+        <div className="card rounded-10 overflow-hidden border-l-4" style={{ borderLeftColor: '#16a34a' }}>
+          <SectionHeader
+            title={language === 'sl' ? 'Izvoz za računovodstvo' : 'Esportazione per contabilità'}
+            open={openSection === 'export'}
+            onToggle={() => toggleSection('export')}
+          />
+          {openSection === 'export' && (
+            <div className="px-5 pb-6 space-y-5 border-t border-accent-soft pt-4">
+              {/* Period selectors */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <FieldLabel text={language === 'sl' ? 'Mesec' : 'Mese'} />
+                  <div className="relative">
+                    <select
+                      className="input-field w-full pr-9 appearance-none cursor-pointer"
+                      value={exportMonth}
+                      onChange={(e) => setExportMonth(parseInt(e.target.value, 10))}
+                    >
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                        <option key={m} value={m}>
+                          {String(m).padStart(2, '0')} — {EXPORT_MONTHS[language][m - 1]}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={16}
+                      strokeWidth={1.8}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <FieldLabel text={language === 'sl' ? 'Leto' : 'Anno'} />
+                  <div className="relative">
+                    <select
+                      className="input-field w-full pr-9 appearance-none cursor-pointer"
+                      value={exportYear}
+                      onChange={(e) => setExportYear(parseInt(e.target.value, 10))}
+                    >
+                      {EXPORT_YEARS.map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={16}
+                      strokeWidth={1.8}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Export buttons */}
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleExportPartners}
+                  disabled={exportingPartners}
+                  className="btn-secondary text-sm flex items-center gap-2"
+                >
+                  {exportingPartners ? (
+                    <><span className="spinner w-4 h-4" /> {t('common.loading')}</>
+                  ) : (
+                    <><Users size={15} strokeWidth={1.8} /> {language === 'sl' ? 'Izvozi partnerje' : 'Esporta partner'}</>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportInvoices}
+                  disabled={exportingInvoices}
+                  className="btn-secondary text-sm flex items-center gap-2"
+                >
+                  {exportingInvoices ? (
+                    <><span className="spinner w-4 h-4" /> {t('common.loading')}</>
+                  ) : (
+                    <><FileText size={15} strokeWidth={1.8} /> {language === 'sl' ? 'Izvozi račune' : 'Esporta fatture'}</>
+                  )}
+                </button>
+              </div>
+
+              <p className="text-xs text-text-muted">
+                {language === 'sl'
+                  ? `Datoteki: Archive1_${exportPeriodSuffix}.xlsx (partnerji), Archive2_${exportPeriodSuffix}.xlsx (računi)`
+                  : `File: Archive1_${exportPeriodSuffix}.xlsx (partner), Archive2_${exportPeriodSuffix}.xlsx (fatture)`}
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── STICKY SAVE FOOTER ── */}

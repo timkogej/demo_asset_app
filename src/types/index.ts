@@ -227,6 +227,46 @@ export interface InvoiceTemplate {
   lines?: InvoiceTemplateLine[];
 }
 
+export interface PaymentReminder {
+  id: string;
+  invoice_id: string;
+  client_id: string;
+  invoice_number: string;
+  reminder_level: number;
+  sent_at: string;
+  email_status: 'sent' | 'failed' | 'pending';
+  sms_status: 'sent' | 'failed' | 'pending';
+  sms_number: string | null;
+  email_address: string | null;
+  created_by: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface ReminderTemplate {
+  id: number;
+  reminder_level: number;
+  name_it: string;
+  subject_email_it: string;
+  body_email_it: string;
+  body_sms_it: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReminderWithDetails extends PaymentReminder {
+  invoice_total: number | null;
+  due_date: string | null;
+  service_period: string | null;
+  invoice_status: string | null;
+  client_name: string | null;
+  client_email: string | null;
+  client_phone: string | null;
+  client_country: string | null;
+  vehicle_name: string | null;
+  registration_number: string | null;
+}
+
 export interface Settings {
   id: number;
   company_name: string | null;
@@ -260,4 +300,8 @@ export interface Settings {
   deepl_webhook_url: string | null;
   logo_manutecnica_url: string | null;
   logo_varent_url: string | null;
+  sms_sender_number: string | null;
+  bulkgate_app_id: string | null;
+  bulkgate_app_token: string | null;
+  reminder_webhook_url: string | null;
 }

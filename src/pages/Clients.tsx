@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Plus, Pencil, Trash2, Mail, Phone, Lock, X, ChevronDown, Car } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Mail, Phone, Lock, X, ChevronDown, Car, Bell, CheckCircle, XCircle, Clock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
 import SearchInput from '../components/ui/SearchInput';
 import { isValidClientId, formatClientId } from '../lib/utils';
 import { clientDisplayName, countryFlag } from '../lib/clientHelpers';
-import { formatCurrency } from '../lib/invoiceCalculations';
-import type { Client, Language } from '../types';
+import { formatCurrency, formatDate } from '../lib/invoiceCalculations';
+import { useClientReminderCounts } from '../hooks/useReminders';
+import { REMINDER_LEVEL_NAMES, REMINDER_LEVEL_COLORS } from '../components/reminders/ReminderConfirmModal';
+import { useTranslation } from '../i18n/useTranslation';
+import type { Client, Language, ReminderWithDetails } from '../types';
 
 const COUNTRY_OPTIONS = ['SI', 'IT', 'HR', 'DE', 'RO', 'AT', 'HU', 'FR', 'ES', 'NL', 'BE', 'PL'];
 
@@ -646,6 +649,127 @@ function VehiclePopover({ vehicles, onClose }: { vehicles: Client['vehicles']; o
   );
 }
 
+// ─── Client Reminders Panel ───────────────────────────────────────────────────
+function ReminderStatusIcon({ status }: { status: 'sent' | 'failed' | 'pending' }) {
+  if (status === 'sent') return <CheckCircle size={12} className="text-green-600" strokeWidth={2} />;
+  if (status === 'failed') return <XCircle size={12} className="text-red-500" strokeWidth={2} />;
+  return <Clock size={12} className="text-amber-500" strokeWidth={2} />;
+}
+
+function ClientRemindersPanel({ clientId, clientName, onClose }: {
+  clientId: string;
+  clientName: string;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [reminders, setReminders] = useState<ReminderWithDetails[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handle);
+    return () => document.removeEventListener('keydown', handle);
+  }, [onClose]);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('reminders_with_details')
+          .select('*')
+          .eq('client_id', clientId)
+          .order('sent_at', { ascending: false });
+        if (error) throw error;
+        setReminders((data as ReminderWithDetails[]) || []);
+      } catch {
+        // non-critical
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [clientId]);
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-text-dark/20 z-30" onClick={onClose} />
+      <div className="fixed inset-y-0 right-0 w-[480px] bg-surface shadow-xl z-40 flex flex-col animate-slideInRight border-l border-accent-muted">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-accent-soft shrink-0">
+          <div className="flex items-center gap-2">
+            <Bell size={16} className="text-text-muted" strokeWidth={1.8} />
+            <div>
+              <p className="font-semibold text-text-dark text-sm">{t('rem.reminders')}</p>
+              <p className="text-xs text-text-muted">{clientName}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-text-muted hover:text-text-dark p-1 rounded-10 hover:bg-bg">
+            <X size={18} strokeWidth={1.8} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="p-5 space-y-3">
+              {[1, 2, 3].map((n) => (
+                <div key={n} className="h-10 bg-accent-soft rounded animate-pulse" />
+              ))}
+            </div>
+          ) : reminders.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-text-muted gap-3">
+              <Bell size={36} strokeWidth={1.2} />
+              <p className="text-sm">{t('rem.none_client')}</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr>
+                    <th className="table-header">Datum</th>
+                    <th className="table-header">Račun</th>
+                    <th className="table-header">Nivo</th>
+                    <th className="table-header">Email</th>
+                    <th className="table-header">SMS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reminders.map((r) => (
+                    <tr key={r.id} className="table-row">
+                      <td className="table-cell text-text-muted">
+                        {formatDate(r.sent_at)}
+                      </td>
+                      <td className="table-cell font-mono font-bold text-primary">
+                        {r.invoice_number}
+                      </td>
+                      <td className="table-cell">
+                        <span className={`px-1.5 py-0.5 rounded-full font-medium text-[11px] border ${REMINDER_LEVEL_COLORS[r.reminder_level] ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                          {REMINDER_LEVEL_NAMES[r.reminder_level] ?? `Opomin ${r.reminder_level}`}
+                        </span>
+                      </td>
+                      <td className="table-cell">
+                        <div className="flex items-center gap-1">
+                          <ReminderStatusIcon status={r.email_status} />
+                          <span className="text-text-muted">{r.email_status === 'sent' ? '✓' : r.email_status === 'failed' ? '✗' : '…'}</span>
+                        </div>
+                      </td>
+                      <td className="table-cell">
+                        <div className="flex items-center gap-1">
+                          <ReminderStatusIcon status={r.sms_status} />
+                          <span className="text-text-muted">{r.sms_status === 'sent' ? '✓' : r.sms_status === 'failed' ? '✗' : '…'}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function Clients({ t }: ClientsProps) {
   const [clients, setClients] = useState<Client[]>([]);
@@ -665,6 +789,8 @@ export default function Clients({ t }: ClientsProps) {
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [vehiclePopoverId, setVehiclePopoverId] = useState<string | null>(null);
+  const [remindersClientId, setRemindersClientId] = useState<string | null>(null);
+  const { reminderCounts } = useClientReminderCounts();
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -889,6 +1015,7 @@ export default function Clients({ t }: ClientsProps) {
                   <th className="table-header">{t('cli.is_client')}</th>
                   <th className="table-header">IVA/DDV</th>
                   <th className="table-header">{t('cli.assigned_vehicles')}</th>
+                  <th className="table-header">{t('rem.reminders')}</th>
                   <th className="table-header">{t('clients.actions')}</th>
                 </tr>
               </thead>
@@ -975,6 +1102,23 @@ export default function Clients({ t }: ClientsProps) {
                         )}
                       </td>
 
+                      {/* Reminders */}
+                      <td className="table-cell" style={{ height: 44, paddingTop: 0, paddingBottom: 0 }} onClick={(e) => e.stopPropagation()}>
+                        {(() => {
+                          const count = reminderCounts.get(client.id) ?? 0;
+                          if (count === 0) return <span className="text-text-muted text-xs">—</span>;
+                          return (
+                            <button
+                              onClick={() => setRemindersClientId(client.id)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"
+                            >
+                              <Bell size={11} strokeWidth={2} />
+                              {count}
+                            </button>
+                          );
+                        })()}
+                      </td>
+
                       {/* Actions */}
                       <td className="table-cell" style={{ height: 44, paddingTop: 0, paddingBottom: 0 }}>
                         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
@@ -1042,6 +1186,18 @@ export default function Clients({ t }: ClientsProps) {
           t={t}
         />
       )}
+
+      {/* Client Reminders Panel */}
+      {remindersClientId && (() => {
+        const client = clients.find((c) => c.id === remindersClientId);
+        return (
+          <ClientRemindersPanel
+            clientId={remindersClientId}
+            clientName={client ? clientDisplayName(client) : remindersClientId}
+            onClose={() => setRemindersClientId(null)}
+          />
+        );
+      })()}
 
       {/* Add Client Modal */}
       <Modal

@@ -503,6 +503,16 @@ export const translations = {
       method_paypal: 'PAYPAL',
       method_other: 'DRUGO / ALTRO',
     },
+    rem: {
+      reminders: 'Solleciti',
+      send: 'Invia sollecito',
+      send_prefix: 'Invia',
+      sent: 'Sollecito inviato (email + SMS)',
+      all_sent: 'Tutti i solleciti inviati',
+      history: 'Storico solleciti',
+      none: 'Nessun sollecito',
+      none_client: 'Nessun sollecito inviato per questo cliente.',
+    },
     pagination: {
       previous: 'Precedente',
       next: 'Successiva',
@@ -1012,6 +1022,16 @@ export const translations = {
       method_card: 'KREDITNA KARTICA / CARTA DI CREDITO',
       method_paypal: 'PAYPAL',
       method_other: 'DRUGO / ALTRO',
+    },
+    rem: {
+      reminders: 'Opomniki',
+      send: 'Pošlji opomnik',
+      send_prefix: 'Pošlji',
+      sent: 'Opomnik poslan (email + SMS)',
+      all_sent: 'Vsi opomniki poslani',
+      history: 'Zgodovina opomnikov',
+      none: 'Ni opomnikov',
+      none_client: 'Ni poslanih opomnikov za to stranko.',
     },
     pagination: {
       previous: 'Prejšnja',
