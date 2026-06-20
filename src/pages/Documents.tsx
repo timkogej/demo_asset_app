@@ -612,7 +612,8 @@ export default function Documents({ t }: DocumentsProps) {
         </div>
       ) : (
         <div className="card overflow-hidden p-0">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+          <table className="w-full text-sm min-w-[760px]">
             <thead>
               <tr className="border-b" style={{ borderColor: 'var(--color-accent-soft)' }}>
                 <th className="table-header w-8"></th>
@@ -709,6 +710,7 @@ export default function Documents({ t }: DocumentsProps) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

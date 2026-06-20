@@ -1,10 +1,47 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Banknote, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Banknote, Search, ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import { clientDisplayName } from '../lib/clientHelpers';
 import { formatCurrency } from '../lib/invoiceCalculations';
+import Modal from '../components/ui/Modal';
 import type { Language, Payment } from '../types';
+
+/**
+ * Ponovno izračuna status povezanega računa iz VSEH trenutnih plačil v bazi.
+ * Nikoli se ne zanaša na star is_partial flag — vedno sveže iz baze.
+ * Preklaplja samo med 'sent' in 'paid'; cancelled/draft računov se ne dotika.
+ */
+async function recalculateInvoiceStatus(invoiceId: string) {
+  const { data: invoice, error: invoiceError } = await supabase
+    .from('invoices')
+    .select('status, total')
+    .eq('id', invoiceId)
+    .single();
+
+  if (invoiceError) throw invoiceError;
+  // Varnostna zaščita: cancelled/draft računov ne spreminjamo.
+  if (!invoice || invoice.status === 'cancelled' || invoice.status === 'draft') {
+    return;
+  }
+
+  const { data: payments, error: paymentsError } = await supabase
+    .from('payments')
+    .select('amount')
+    .eq('invoice_id', invoiceId);
+
+  if (paymentsError) throw paymentsError;
+
+  const totalPaid = (payments || []).reduce((sum, p) => sum + (p.amount ?? 0), 0);
+  const newStatus = totalPaid >= invoice.total ? 'paid' : 'sent';
+
+  const { error: updateError } = await supabase
+    .from('invoices')
+    .update({ status: newStatus })
+    .eq('id', invoiceId);
+
+  if (updateError) throw updateError;
+}
 
 interface PaymentsProps {
   t: (key: string) => string;
@@ -29,6 +66,12 @@ export default function Payments({ t }: PaymentsProps) {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Akcije: brisanje in urejanje
+  const [deleteTarget, setDeleteTarget] = useState<Payment | null>(null);
+  const [editTarget, setEditTarget] = useState<Payment | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const fetchPayments = useCallback(async () => {
     setLoading(true);
@@ -82,6 +125,62 @@ export default function Payments({ t }: PaymentsProps) {
   const paginated = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const goToPage = (p: number) => setCurrentPage(Math.min(Math.max(1, p), totalPages));
+
+  // Brisanje plačila
+  const handleDelete = async () => {
+    if (!deleteTarget || busy) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from('payments')
+        .delete()
+        .eq('id', deleteTarget.id);
+      if (error) throw error;
+
+      await recalculateInvoiceStatus(deleteTarget.invoice_id);
+
+      await fetchPayments();
+      setDeleteTarget(null);
+      toast.success('Plačilo izbrisano');
+    } catch {
+      toast.error(t('error.generic') || 'Napaka pri brisanju plačila');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Urejanje zneska plačila
+  const openEdit = (p: Payment) => {
+    setEditTarget(p);
+    setEditAmount(String(p.amount));
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editTarget || busy) return;
+    const newAmount = parseFloat(editAmount);
+    if (isNaN(newAmount) || newAmount <= 0) {
+      toast.error('Znesek mora biti večji od 0');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from('payments')
+        .update({ amount: newAmount })
+        .eq('id', editTarget.id);
+      if (error) throw error;
+
+      await recalculateInvoiceStatus(editTarget.invoice_id);
+
+      await fetchPayments();
+      setEditTarget(null);
+      toast.success('Plačilo posodobljeno');
+    } catch {
+      toast.error(t('error.generic') || 'Napaka pri posodabljanju plačila');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // Reset page on filter change
   useEffect(() => { setCurrentPage(1); }, [search, filterType, dateFrom, dateTo]);
@@ -176,6 +275,7 @@ export default function Payments({ t }: PaymentsProps) {
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-text-muted uppercase tracking-wider">{t('pay.method')}</th>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-text-muted uppercase tracking-wider">Status</th>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-text-muted uppercase tracking-wider">Note</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-text-muted uppercase tracking-wider"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-accent-soft">
@@ -223,6 +323,26 @@ export default function Payments({ t }: PaymentsProps) {
                       <td className="px-4 py-3 text-xs text-text-muted max-w-[120px] truncate">
                         {p.notes ?? ''}
                       </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => openEdit(p)}
+                            className="p-1.5 rounded-10 text-text-muted hover:text-primary hover:bg-accent-soft transition-colors"
+                            aria-label="Uredi plačilo"
+                            title="Uredi znesek"
+                          >
+                            <Pencil size={16} strokeWidth={1.8} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteTarget(p)}
+                            className="p-1.5 rounded-10 text-danger hover:bg-danger/10 transition-colors"
+                            aria-label="Izbriši plačilo"
+                            title="Izbriši plačilo"
+                          >
+                            <Trash2 size={16} strokeWidth={1.8} />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -262,6 +382,98 @@ export default function Payments({ t }: PaymentsProps) {
           </div>
         </div>
       )}
+
+      {/* Modal — potrditev brisanja */}
+      <Modal
+        isOpen={!!deleteTarget}
+        onClose={() => !busy && setDeleteTarget(null)}
+        title="Izbriši plačilo?"
+        maxWidth="max-w-sm"
+      >
+        {deleteTarget && (
+          <>
+            <p className="text-sm text-text-dark mb-6">
+              Znesek <span className="font-semibold">€ {formatCurrency(deleteTarget.amount)}</span> za
+              račun <span className="font-semibold">{deleteTarget.invoice?.invoice_number ?? '—'}</span> bo
+              odstranjen. Ta akcija je nepovratna.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={busy}
+                className="btn-secondary disabled:opacity-50"
+              >
+                Prekliči
+              </button>
+              <button onClick={handleDelete} disabled={busy} className="btn-danger disabled:opacity-50">
+                {busy ? '…' : 'Izbriši'}
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      {/* Modal — urejanje zneska */}
+      <Modal
+        isOpen={!!editTarget}
+        onClose={() => !busy && setEditTarget(null)}
+        title="Uredi plačilo"
+        maxWidth="max-w-md"
+      >
+        {editTarget && (
+          <>
+            <div className="space-y-4 mb-6">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-xs text-text-muted mb-0.5">Račun</p>
+                  <p className="font-mono text-primary">{editTarget.invoice?.invoice_number ?? '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-text-muted mb-0.5">{t('pay.date')}</p>
+                  <p className="text-text-dark">{formatDate(editTarget.payment_date)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-text-muted mb-0.5">{t('pay.method')}</p>
+                  <p className="text-text-dark">{editTarget.method ?? '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-text-muted mb-0.5">Note</p>
+                  <p className="text-text-dark truncate">{editTarget.notes || '—'}</p>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-text-muted mb-1.5">
+                  {t('pay.amount')} (€)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  autoFocus
+                  className="input-field w-full"
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveEdit();
+                  }}
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setEditTarget(null)}
+                disabled={busy}
+                className="btn-secondary disabled:opacity-50"
+              >
+                Prekliči
+              </button>
+              <button onClick={handleSaveEdit} disabled={busy} className="btn-primary disabled:opacity-50">
+                {busy ? '…' : 'Shrani'}
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

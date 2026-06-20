@@ -550,7 +550,7 @@ export default function Settings({ t, language }: SettingsProps) {
     try {
       const { data, error } = await supabase
         .from('invoices')
-        .select('client_id, client:clients(id, company_name, address, city, postal_code, country, tax_number)')
+        .select('client_id, client:clients(id, company_name, company_name_additional, address, city, postal_code, country, tax_number)')
         .eq('billing_month', exportMonth)
         .eq('billing_year_check', exportYear)
         .neq('status', 'cancelled');
@@ -561,6 +561,7 @@ export default function Settings({ t, language }: SettingsProps) {
         client: {
           id: string;
           company_name: string | null;
+          company_name_additional: string | null;
           address: string | null;
           city: string | null;
           postal_code: string | null;
@@ -592,7 +593,7 @@ export default function Settings({ t, language }: SettingsProps) {
         seen.add(c.id);
         partners.push({
           sifra: c.id,
-          naziv: c.company_name ?? '',
+          naziv: c.company_name || c.company_name_additional || '',
           naslov: c.address ?? '',
           mesto: c.city ?? '',
           davcna: c.tax_number ?? '',
@@ -627,16 +628,16 @@ export default function Settings({ t, language }: SettingsProps) {
     try {
       const { data, error } = await supabase
         .from('invoices')
-        .select('invoice_number, invoice_date, subtotal, vat_amount, total, client_id')
+        .select('invoice_number, invoice_date, status, subtotal, vat_amount, total, client_id')
         .eq('billing_month', exportMonth)
         .eq('billing_year_check', exportYear)
-        .neq('status', 'cancelled')
         .order('invoice_sequence', { ascending: true });
       if (error) throw error;
 
       type InvoiceQueryRow = {
         invoice_number: string;
         invoice_date: string;
+        status: string | null;
         subtotal: number | null;
         vat_amount: number | null;
         total: number | null;
@@ -649,14 +650,20 @@ export default function Settings({ t, language }: SettingsProps) {
         return;
       }
 
-      const invoices = rows.map((r) => ({
-        stevilka: r.invoice_number,
-        datum: formatExportDate(r.invoice_date),
-        osnova: toMoney(r.subtotal),
-        ddv: toMoney(r.vat_amount),
-        skupaj: toMoney(r.total),
-        sifra: r.client_id ?? '',
-      }));
+      const invoices = rows.map((r) => {
+        const isCancelled = r.status === 'cancelled';
+        const subtotal = isCancelled ? 0 : r.subtotal;
+        const vat_amount = isCancelled ? 0 : r.vat_amount;
+        const total = isCancelled ? 0 : r.total;
+        return {
+          stevilka: r.invoice_number,
+          datum: formatExportDate(r.invoice_date),
+          osnova: toMoney(subtotal),
+          ddv: toMoney(vat_amount),
+          skupaj: toMoney(total),
+          sifra: r.client_id ?? '',
+        };
+      });
 
       exportToExcel(
         invoices,
