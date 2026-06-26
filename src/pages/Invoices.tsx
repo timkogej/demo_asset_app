@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Eye, Send, Download, CheckCircle, AlertTriangle, X, FileText, Plus, Trash2,
   ChevronUp, ChevronDown, Pencil, ChevronLeft, ChevronRight, Filter, Bell,
+  Check,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
@@ -17,10 +18,12 @@ import {
   getItalianMonth,
 } from '../lib/invoiceCalculations';
 import { generateInvoicePDF } from '../lib/pdfGenerator';
+import { VAT_EXCEPTION_TEXTS, findVatExceptionByFull } from '../lib/constants';
 import { resolveVariables, resolveUnitPrice } from '../lib/invoiceVariables';
 import ReminderConfirmModal, { REMINDER_LEVEL_NAMES, REMINDER_BUTTON_COLORS } from '../components/reminders/ReminderConfirmModal';
 import ReminderHistoryPopover from '../components/reminders/ReminderHistoryPopover';
 import { useSendReminder } from '../hooks/useReminders';
+import Select from '../components/ui/Select';
 import type {
   Language, InvoiceRecord, InvoiceStatus, InvoiceType,
   InvoiceItem, Client, Vehicle, Settings, Payment, InvoiceCode,
@@ -112,6 +115,8 @@ interface ManualForm {
   clientId: string;
   vehicleId: string;
   isReverseCharge: boolean;
+  vatOverride: boolean;
+  vatExceptionId: string | null;
   viesStatus: 'idle' | 'checking' | 'valid' | 'invalid' | 'not_applicable';
   dueDate: string;
   notes: string;
@@ -129,6 +134,8 @@ const BLANK_FORM: ManualForm = {
   clientId: '',
   vehicleId: '',
   isReverseCharge: false,
+  vatOverride: false,
+  vatExceptionId: null,
   viesStatus: 'idle',
   dueDate: '',
   notes: '',
@@ -523,6 +530,11 @@ export default function Invoices({ t, language }: InvoicesProps) {
   const [formPdfLoading, setFormPdfLoading] = useState(false);
   const [invoiceCodes, setInvoiceCodes] = useState<InvoiceCode[]>([]);
   const viesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // inline DDV (VAT) override editing in step 1
+  const [vatEditing, setVatEditing] = useState(false);
+  const [vatDraftOverride, setVatDraftOverride] = useState(false);
+  const [vatDraftExceptionId, setVatDraftExceptionId] = useState<string | null>(null);
 
   // invoice number: peeked on open (no increment), reserved on save (increments counter)
   const [peekedInvoiceNum, setPeekedInvoiceNum] = useState('');
@@ -1170,7 +1182,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
     const clientVehicles = vehicles.filter((v) => v.client_id === clientId);
     setFilteredVehicles(clientVehicles);
     setClientError(false);
-    setForm((f) => ({ ...f, clientId, vehicleId: '', isReverseCharge: false, viesStatus: 'idle' }));
+    setForm((f) => ({ ...f, clientId, vehicleId: '', isReverseCharge: false, vatOverride: false, vatExceptionId: null, viesStatus: 'idle' }));
+    setVatEditing(false);
 
     // VIES check
     if (client.country !== 'SI' && client.is_vat_payer && client.tax_number) {
@@ -1184,6 +1197,9 @@ export default function Invoices({ t, language }: InvoicesProps) {
             ...f,
             viesStatus: result.valid ? 'valid' : 'invalid',
             isReverseCharge: rc,
+            // Reverse charge takes precedence over a manual 0% override.
+            vatOverride: rc ? false : f.vatOverride,
+            vatExceptionId: rc ? null : f.vatExceptionId,
           }));
         } catch {
           setForm((f) => ({ ...f, viesStatus: 'invalid' }));
@@ -1233,7 +1249,23 @@ export default function Invoices({ t, language }: InvoicesProps) {
 
   const getFormSettings = async (): Promise<Settings> => getSettings();
 
-  const formTotals = calculateInvoiceTotals(formItems, 22, form.isReverseCharge);
+  // A manual 0% override zeroes VAT just like reverse charge does.
+  const formTotals = calculateInvoiceTotals(formItems, 22, form.isReverseCharge || form.vatOverride);
+
+  // VAT-related columns to persist, accounting for a manual 0% override.
+  function vatDbFields(settings: Settings | null) {
+    const exceptionFull = form.vatOverride
+      ? (VAT_EXCEPTION_TEXTS.find((e) => e.id === form.vatExceptionId)?.full ?? null)
+      : null;
+    return {
+      subtotal: formTotals.subtotal,
+      vat_rate: form.vatOverride ? 0 : (settings?.vat_rate ?? 22),
+      vat_amount: formTotals.vatAmount,
+      total: formTotals.total,
+      vat_override: form.vatOverride,
+      vat_exception_text: exceptionFull,
+    };
+  }
 
   async function goToStep3() {
     setFormStep(3);
@@ -1259,10 +1291,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
         contract_ref_date: null,
         contract_ref_it: null,
         contract_ref_sl: null,
-        subtotal: formTotals.subtotal,
-        vat_rate: settings?.vat_rate ?? 22,
-        vat_amount: formTotals.vatAmount,
-        total: formTotals.total,
+        ...vatDbFields(settings),
         is_reverse_charge: form.isReverseCharge,
         vat_exempt_reason: null,
         status: 'draft',
@@ -1321,10 +1350,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
         due_date: form.dueDate,
         contract_ref_it: null,
         contract_ref_sl: null,
-        subtotal: formTotals.subtotal,
-        vat_rate: settings?.vat_rate ?? 22,
-        vat_amount: formTotals.vatAmount,
-        total: formTotals.total,
+        ...vatDbFields(settings),
         is_reverse_charge: form.isReverseCharge,
         status: 'draft',
         language: (() => {
@@ -1402,10 +1428,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
         due_date: form.dueDate,
         contract_ref_it: null,
         contract_ref_sl: null,
-        subtotal: formTotals.subtotal,
-        vat_rate: settings?.vat_rate ?? 22,
-        vat_amount: formTotals.vatAmount,
-        total: formTotals.total,
+        ...vatDbFields(settings),
         is_reverse_charge: form.isReverseCharge,
         status: 'confirmed',
         language: (() => {
@@ -1482,10 +1505,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
         due_date: form.dueDate,
         contract_ref_it: null,
         contract_ref_sl: null,
-        subtotal: formTotals.subtotal,
-        vat_rate: settings?.vat_rate ?? 22,
-        vat_amount: formTotals.vatAmount,
-        total: formTotals.total,
+        ...vatDbFields(settings),
         is_reverse_charge: form.isReverseCharge,
         status: 'confirmed',
         language: (() => {
@@ -1548,6 +1568,9 @@ export default function Invoices({ t, language }: InvoicesProps) {
     setShowManualForm(false);
     setShowLeaveConfirm(false);
     setForm(BLANK_FORM);
+    setVatEditing(false);
+    setVatDraftOverride(false);
+    setVatDraftExceptionId(null);
     setBillingMonth(new Date().getMonth() + 1);
     setBillingYear(new Date().getFullYear());
     setFormStep(1);
@@ -1586,6 +1609,8 @@ export default function Invoices({ t, language }: InvoicesProps) {
         clientId: full.client_id || '',
         vehicleId: full.vehicle_id || '',
         isReverseCharge: full.is_reverse_charge,
+        vatOverride: full.vat_override ?? false,
+        vatExceptionId: findVatExceptionByFull(full.vat_exception_text)?.id ?? null,
         viesStatus: 'idle',
         dueDate: full.due_date || '',
         notes: full.notes || '',
@@ -1638,10 +1663,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
         contract_ref_it:  null,
         contract_ref_sl:  null,
         is_reverse_charge: form.isReverseCharge,
-        subtotal:         formTotals.subtotal,
-        vat_rate:         settings?.vat_rate ?? 22,
-        vat_amount:       formTotals.vatAmount,
-        total:            formTotals.total,
+        ...vatDbFields(settings),
         language:         clients.find((c) => c.id === form.clientId)?.country === 'SI' ? 'sl' : 'it',
         input_language:   form.inputLanguage,
         notes:            form.notes,
@@ -1688,10 +1710,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
         contract_ref_it: null,
         contract_ref_sl: null,
         is_reverse_charge: form.isReverseCharge,
-        subtotal: formTotals.subtotal,
-        vat_rate: settings?.vat_rate ?? 22,
-        vat_amount: formTotals.vatAmount,
-        total: formTotals.total,
+        ...vatDbFields(settings),
         client: client as Client,
         vehicle: vehicle as Vehicle,
         items: formItems,
@@ -2577,22 +2596,21 @@ export default function Invoices({ t, language }: InvoicesProps) {
                   <div className="space-y-4">
                     <div>
                       <label className="label">{t('inv.client')}</label>
-                      <div className="relative">
-                        <select
-                          value={form.clientId}
-                          onChange={(e) => handleClientSelect(e.target.value)}
-                          className="appearance-none input-field pr-8 cursor-pointer"
-                          style={clientError ? { border: '1px solid #c0392b' } : undefined}
-                        >
-                          <option value="">— izberite stranko —</option>
-                          {clients.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              [{c.id}] {clientDisplayName(c)}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={14} />
-                      </div>
+                      <Select
+                        value={form.clientId}
+                        onChange={handleClientSelect}
+                        error={clientError}
+                        placeholder="— izberite stranko —"
+                        searchable
+                        searchPlaceholder="Išči stranko..."
+                        emptyLabel="Ni zadetkov"
+                        options={clients.map((c) => ({
+                          value: c.id,
+                          label: clientDisplayName(c),
+                          sublabel: c.city ?? undefined,
+                          searchText: `${c.company_name ?? ''} ${c.company_name_additional ?? ''}`,
+                        }))}
+                      />
                       {clientError && (
                         <p className="mt-1 text-xs text-danger">{t('inv.client_required')}</p>
                       )}
@@ -2625,38 +2643,130 @@ export default function Invoices({ t, language }: InvoicesProps) {
                     </div>
                     <div>
                       <label className="label">{t('inv.vehicle')}</label>
-                      <div className="relative">
-                        <select
-                          value={form.vehicleId}
-                          onChange={(e) => handleVehicleSelect(e.target.value)}
-                          className="appearance-none input-field pr-8 cursor-pointer disabled:cursor-not-allowed"
-                          disabled={!form.clientId}
-                        >
-                          <option value="">— izberite vozilo —</option>
-                          {filteredVehicles.map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.registration_number} {v.vehicle_name ? `— ${v.vehicle_name}` : ''}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted" size={14} />
-                      </div>
+                      <Select
+                        value={form.vehicleId}
+                        onChange={handleVehicleSelect}
+                        disabled={!form.clientId}
+                        placeholder="— izberite vozilo —"
+                        emptyLabel="Ni vozil"
+                        options={filteredVehicles.map((v) => ({
+                          value: v.id,
+                          label: v.vehicle_name || v.registration_number,
+                          sublabel: v.vehicle_name ? v.registration_number : undefined,
+                        }))}
+                      />
                     </div>
-                    {/* RC badge */}
-                    <div className="flex items-center gap-2">
-                      {form.isReverseCharge ? (
+                    {/* VAT badge + inline override editor */}
+                    {form.isReverseCharge ? (
+                      // Reverse charge takes precedence — no manual override allowed.
+                      <div className="flex items-center gap-2">
                         <span className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-medium rounded">
                           {t('inv.reverse_charge')}
                         </span>
-                      ) : (
-                        <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded">
-                          IVA 22%
-                        </span>
-                      )}
-                      {form.isReverseCharge && (
                         <span className="text-xs text-text-muted">{t('inv.vies_reason_valid')}</span>
-                      )}
-                    </div>
+                      </div>
+                    ) : vatEditing ? (
+                      // Inline edit UI (stays in place, no extra modal)
+                      <div className="flex flex-col gap-2 p-2.5 rounded border border-accent-soft bg-surface-soft">
+                        {/* Step A — choose VAT % */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => { setVatDraftOverride(false); setVatDraftExceptionId(null); }}
+                            className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                              !vatDraftOverride
+                                ? 'bg-green-100 text-green-700 border-green-300'
+                                : 'bg-white text-text-muted border-accent-soft hover:border-green-300'
+                            }`}
+                          >
+                            22%
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVatDraftOverride(true)}
+                            className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                              vatDraftOverride
+                                ? 'bg-amber-100 text-amber-700 border-amber-300'
+                                : 'bg-white text-text-muted border-accent-soft hover:border-amber-300'
+                            }`}
+                          >
+                            0%
+                          </button>
+                          {/* Step C — confirm / cancel */}
+                          <button
+                            type="button"
+                            disabled={vatDraftOverride && !vatDraftExceptionId}
+                            onClick={() => {
+                              setForm((f) => ({
+                                ...f,
+                                vatOverride: vatDraftOverride,
+                                vatExceptionId: vatDraftOverride ? vatDraftExceptionId : null,
+                              }));
+                              setVatEditing(false);
+                            }}
+                            className="ml-1 p-1 rounded text-green-700 hover:bg-green-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="Potrdi"
+                          >
+                            <Check size={14} strokeWidth={2.2} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVatEditing(false)}
+                            className="p-1 rounded text-text-muted hover:bg-accent-soft"
+                            title="Prekliči"
+                          >
+                            <X size={14} strokeWidth={2.2} />
+                          </button>
+                        </div>
+                        {/* Step B — choose exception article when 0% */}
+                        {vatDraftOverride && (
+                          <Select
+                            value={vatDraftExceptionId ?? ''}
+                            onChange={(v) => setVatDraftExceptionId(v || null)}
+                            compact
+                            placeholder="— izberite stavek —"
+                            options={VAT_EXCEPTION_TEXTS.map((ex) => ({
+                              value: ex.id,
+                              label: ex.full,
+                            }))}
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      // Read-only badge with pencil (only once client + vehicle known)
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          {form.vatOverride ? (
+                            <span className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-medium rounded">
+                              DDV 0%
+                            </span>
+                          ) : (
+                            <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded">
+                              IVA 22%
+                            </span>
+                          )}
+                          {form.clientId && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setVatDraftOverride(form.vatOverride);
+                                setVatDraftExceptionId(form.vatExceptionId);
+                                setVatEditing(true);
+                              }}
+                              className="p-1 rounded text-text-muted hover:bg-accent-soft"
+                              title="Uredi DDV"
+                            >
+                              <Pencil size={14} strokeWidth={1.8} />
+                            </button>
+                          )}
+                        </div>
+                        {form.vatOverride && form.vatExceptionId && (
+                          <span className="text-xs text-text-muted">
+                            {VAT_EXCEPTION_TEXTS.find((e) => e.id === form.vatExceptionId)?.short}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div>
                       <label className="label">{t('inv.due_date')}</label>
                       <input
@@ -2903,7 +3013,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
                       {t('inv.subtotal')}: <strong className="text-text-dark">€ {formatCurrency(formTotals.subtotal)}</strong>
                     </span>
                     <span className="text-text-muted">
-                      {form.isReverseCharge ? t('inv.reverse_charge') : `IVA ${22}%`}:{' '}
+                      {form.isReverseCharge ? t('inv.reverse_charge') : form.vatOverride ? 'DDV 0%' : `IVA ${22}%`}:{' '}
                       <strong className="text-text-dark">€ {formatCurrency(formTotals.vatAmount)}</strong>
                     </span>
                     <span className="text-text-muted">

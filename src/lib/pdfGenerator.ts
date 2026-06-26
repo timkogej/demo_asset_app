@@ -207,9 +207,14 @@ export async function generateInvoicePDF(
 
   const isCancelled = invoice.status === 'cancelled';
 
+  // TEMP DEBUG — verify the override fields reach the PDF generator
+  console.log('[pdfGenerator] vat_override =', invoice.vat_override, '| vat_exception_text =', invoice.vat_exception_text, '| vat_amount =', invoice.vat_amount, '| total =', invoice.total);
+
+  // A manual 0% override (like reverse charge) means no VAT: amount 0, total = subtotal.
+  const vatZeroed = invoice.vat_override === true;
   const displaySubtotal = isCancelled ? 0 : invoice.subtotal;
-  const displayVatAmount = isCancelled ? 0 : invoice.vat_amount;
-  const displayTotal = isCancelled ? 0 : invoice.total;
+  const displayVatAmount = isCancelled ? 0 : (vatZeroed ? 0 : invoice.vat_amount);
+  const displayTotal = isCancelled ? 0 : (vatZeroed ? invoice.subtotal : invoice.total);
 
   const marginL = 15;
   const marginR = 195;
@@ -444,6 +449,15 @@ export async function generateInvoicePDF(
       { content: '' },
       { content: '' },
     ]);
+  } else if (invoice.vat_override && invoice.vat_exception_text) {
+    // Manual 0% DDV override — legal exception text, Slovenian only, one line.
+    tableBody.push([
+      { content: '' },
+      { content: deepSanitize(invoice.vat_exception_text), styles: { fontSize: 7, fontStyle: 'italic' } },
+      { content: '' },
+      { content: '' },
+      { content: '' },
+    ]);
   }
 
   // Column headers — SL primary with secondary after "/"
@@ -497,7 +511,11 @@ export async function generateInvoicePDF(
   doc.text(`${formatCurrency(displaySubtotal)} EUR`, marginR, y, { align: 'right' });
   y += 5;
 
-  if (invoice.is_reverse_charge) {
+  if (invoice.vat_override) {
+    // Manual 0% override — Slovenian-only label, no IVA / VAT secondary.
+    doc.text('DDV 0%', totalsX, y);
+    doc.text('0,00 EUR', marginR, y, { align: 'right' });
+  } else if (invoice.is_reverse_charge) {
     const vatLabel = secondaryLang === 'IT' ? 'DDV / IVA 0%'
       : secondaryLang === 'EN' ? 'DDV / VAT 0%'
       : 'DDV 0%';

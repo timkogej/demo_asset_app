@@ -93,6 +93,8 @@ export interface Invoice {
   paid_at?: string;
   pdf_url?: string;
   notes?: string;
+  vat_override?: boolean;
+  vat_exception_text?: string | null;
   created_at: string;
 }
 
@@ -188,6 +190,8 @@ export interface InvoiceRecord {
   total: number;
   is_reverse_charge: boolean;
   vat_exempt_reason: string | null;
+  vat_override?: boolean;
+  vat_exception_text?: string | null;
   status: InvoiceStatus;
   sent_at: string | null;
   sent_to_email: string | null;
