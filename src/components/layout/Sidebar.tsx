@@ -13,9 +13,11 @@ import {
   X,
   LogOut,
   User,
+  NotebookPen,
 } from 'lucide-react';
 import type { Language } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { useNotesNotification } from '../../hooks/useNotesNotification';
 
 interface SidebarProps {
   language: Language;
@@ -35,6 +37,7 @@ const navItems = [
   { path: '/payments', label: 'nav.payments', icon: Banknote, end: false },
   { path: '/analytics', label: 'nav.analytics', icon: BarChart2, end: false },
   { path: '/documents', label: 'nav.documents', icon: FolderOpen, end: false },
+  { path: '/notes', label: 'nav.notes', icon: NotebookPen, end: false },
 ];
 
 const bottomNavItems = [
@@ -52,6 +55,7 @@ export default function Sidebar({
 }: SidebarProps) {
   const sidebarWidth = collapsed ? 64 : 240;
   const { username, signOut } = useAuth();
+  const hasNewNote = useNotesNotification();
 
   return (
     <aside
@@ -114,7 +118,15 @@ export default function Sidebar({
                   }`
                 }
               >
-                <Icon size={17} strokeWidth={1.8} />
+                <span className="relative flex-shrink-0">
+                  <Icon size={17} strokeWidth={1.8} />
+                  {path === '/notes' && hasNewNote && (
+                    <span
+                      className="absolute bg-red-500 rounded-full"
+                      style={{ width: 8, height: 8, top: -2, right: -2 }}
+                    />
+                  )}
+                </span>
                 {!collapsed && <span>{t(label)}</span>}
               </NavLink>
             </li>

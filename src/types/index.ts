@@ -134,6 +134,23 @@ export interface VehicleFile {
   } | null;
 }
 
+export interface Note {
+  id: string;
+  content: string;
+  updated_by: string;
+  updated_at: string;
+  notify_others: boolean;
+  created_at: string;
+}
+
+export interface NoteHistory {
+  id: string;
+  content: string;
+  saved_by: string;
+  saved_at: string;
+  notify_others: boolean;
+}
+
 export interface InvoiceCode {
   code: string;
   description_it: string;

@@ -12,6 +12,7 @@ import Documents from './pages/Documents';
 import Settings from './pages/Settings';
 import Invoices from './pages/Invoices';
 import Payments from './pages/Payments';
+import Notes from './pages/Notes';
 import { useTranslation } from './i18n/useTranslation';
 
 function AppRoutes() {
@@ -39,6 +40,7 @@ function AppRoutes() {
         <Route path="settings" element={<Settings t={t} language={language} />} />
         <Route path="invoices" element={<Invoices t={t} language={language} />} />
         <Route path="payments" element={<Payments t={t} language={language} />} />
+        <Route path="notes" element={<Notes t={t} language={language} />} />
       </Route>
 
       {/* Catch all */}
