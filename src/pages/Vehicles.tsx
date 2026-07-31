@@ -521,6 +521,10 @@ function VehicleFormContent({
               <label className="label">{t('veh.contract_date')}</label>
               <input type="date" className="input-field" value={form.contract_date} onChange={upd('contract_date')} />
             </div>
+            <div>
+              <label className="label">{t('veh.received_installment')} (€)</label>
+              <input type="number" className="input-field" value={form.received_installment} onChange={upd('received_installment')} placeholder="650.00" min="0" step="0.01" />
+            </div>
           </div>
         </div>
       )}
@@ -864,8 +868,16 @@ function VehicleDetailModal({ vehicle, t, onClose, onEdit }: VehicleDetailModalP
           {/* Contract date — always visible for PROPRIETA' */}
           {!isLeasing && (
             <div className="rounded-10 border border-accent-muted p-4" style={{ backgroundColor: 'var(--color-accent-soft)' }}>
-              <p className="text-xs text-text-muted">{t('veh.contract_date')}</p>
-              <p className="text-sm font-medium text-text-dark">{vehicle.contract_date ? formatDate(vehicle.contract_date) : '—'}</p>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                <div>
+                  <p className="text-xs text-text-muted">{t('veh.contract_date')}</p>
+                  <p className="text-sm font-medium text-text-dark">{vehicle.contract_date ? formatDate(vehicle.contract_date) : '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-text-muted">{t('veh.received_installment')}</p>
+                  <p className="text-sm font-medium text-text-dark">{formatCurrency(vehicle.received_installment)}</p>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1520,7 +1532,7 @@ export default function Vehicles({ t }: VehiclesProps) {
                       <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : (v.contract_number || <span className="text-text-muted">—</span>)}</td>
                       <td className={td}>{v.contract_date ? formatDate(v.contract_date) : <span className="text-text-muted">—</span>}</td>
                       <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : formatCurrency(v.lease_installment)}</td>
-                      <td className={td}>{isProprieta ? <span className="text-text-muted">—</span> : formatCurrency(v.received_installment)}</td>
+                      <td className={td}>{formatCurrency(v.received_installment)}</td>
                       {/* Insurance */}
                       <td className={td}>{v.insurance_company || <span className="text-text-muted">—</span>}</td>
                       <td className={td}><ExpiryCell dateStr={v.insurance_expiry} /></td>

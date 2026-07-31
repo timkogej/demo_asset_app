@@ -10,6 +10,7 @@ export function countryFlag(code: string | null): string {
     SI: '🇸🇮', IT: '🇮🇹', HR: '🇭🇷', DE: '🇩🇪',
     RO: '🇷🇴', AT: '🇦🇹', HU: '🇭🇺', FR: '🇫🇷',
     ES: '🇪🇸', NL: '🇳🇱', BE: '🇧🇪', PL: '🇵🇱',
+    CH: '🇨🇭', SM: '🇸🇲',
   };
   return flags[code.toUpperCase()] ?? code;
 }

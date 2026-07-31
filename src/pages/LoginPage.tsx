@@ -68,7 +68,7 @@ export function LoginPage() {
             color: '#1a4731',
             letterSpacing: '-0.5px',
           }}>
-            FleetInvoice
+            Manutecnica
           </div>
           <div style={{ marginTop: '6px', fontSize: '13px', color: '#6b8f75' }}>
             Accedi al tuo account / Prijava
@@ -225,7 +225,7 @@ export function LoginPage() {
           fontSize: '11px',
           color: '#a8d4b3',
         }}>
-          FleetInvoice © {new Date().getFullYear()} — Manutecnica d.o.o.
+          Manutecnica © {new Date().getFullYear()} — Manutecnica d.o.o.
         </div>
       </div>
     </div>

@@ -75,7 +75,7 @@ export default function Sidebar({
             className="text-xl font-bold text-primary"
             style={{ fontFamily: "'Fraunces', serif" }}
           >
-            F
+            M
           </span>
         ) : (
           <div className="flex-1 min-w-0">
@@ -83,9 +83,9 @@ export default function Sidebar({
               className="text-2xl font-bold text-primary"
               style={{ fontFamily: "'Fraunces', serif" }}
             >
-              FleetInvoice
+              Manutecnica
             </span>
-            <p className="text-xs text-text-muted mt-0.5">Fleet leasing manager</p>
+            <p className="text-xs text-text-muted mt-0.5">Gestione noleggio veicoli</p>
           </div>
         )}
         {/* Mobile close button */}

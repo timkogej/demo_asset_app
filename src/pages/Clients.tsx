@@ -12,7 +12,7 @@ import { REMINDER_LEVEL_NAMES, REMINDER_LEVEL_COLORS } from '../components/remin
 import { useTranslation } from '../i18n/useTranslation';
 import type { Client, Language, ReminderWithDetails } from '../types';
 
-const COUNTRY_OPTIONS = ['SI', 'IT', 'HR', 'DE', 'RO', 'AT', 'HU', 'FR', 'ES', 'NL', 'BE', 'PL'];
+const COUNTRY_OPTIONS = ['SI', 'IT', 'HR', 'DE', 'RO', 'AT', 'HU', 'FR', 'ES', 'NL', 'BE', 'PL', 'CH', 'SM'];
 
 interface ClientsProps {
   t: (key: string) => string;

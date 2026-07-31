@@ -26,7 +26,7 @@ interface SettingsProps {
 
 type SectionKey = 'company' | 'banking' | 'invoices' | 'email' | 'templates' | 'reminders' | 'export';
 
-const COUNTRIES = ['SI', 'IT', 'HR', 'DE', 'AT', 'FR', 'HU', 'RO', 'SK', 'CZ'];
+const COUNTRIES = ['SI', 'IT', 'HR', 'DE', 'AT', 'FR', 'HU', 'RO', 'SK', 'CZ', 'CH', 'SM'];
 
 const EXPORT_YEARS = [2024, 2025, 2026];
 

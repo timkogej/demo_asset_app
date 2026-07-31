@@ -79,11 +79,26 @@ async function fetchLogoBase64(url: string): Promise<string | null> {
   }
 }
 
-// ─── TAX LABEL ───────────────────────────────────────────────────────────────
-function getTaxLabel(secondaryLang: InvoiceLang | null): string {
-  if (!secondaryLang) return 'ID za DDV';
-  if (secondaryLang === 'IT') return 'ID za DDV / P. IVA';
-  return 'ID za DDV / VAT ID';
+// ─── TAX NUMBER LABEL ─────────────────────────────────────────────────────────
+function getTaxNumberLabel(secondaryLang: InvoiceLang | null, country: string | null): string {
+  const upper = (country || '').toUpperCase();
+
+  if (upper === 'SI') {
+    // Slovenian client — SL only
+    return 'D. ST.';
+  }
+
+  if (upper === 'IT') {
+    // Italian client — show both
+    return 'D. ST. / C.F.';
+  }
+
+  // Other foreign clients
+  if (secondaryLang === 'EN') {
+    return 'D. ST. / VAT ID';
+  }
+
+  return 'D. ST.';
 }
 
 // ─── PAYMENT METHOD SL TRANSLATION ───────────────────────────────────────────
@@ -312,7 +327,7 @@ export async function generateInvoicePDF(
     clientLines.push(`C.F. ${deepSanitize(client.registration_number)}`);
   }
   if (client?.tax_number) {
-    clientLines.push(`${getTaxLabel(secondaryLang)} ${deepSanitize(client.tax_number)}`);
+    clientLines.push(`${getTaxNumberLabel(secondaryLang, client?.country ?? null)} ${deepSanitize(client.tax_number)}`);
   }
 
   const lineHeight = 4.5;
@@ -392,7 +407,7 @@ export async function generateInvoicePDF(
     // Skip translation for purely numeric content
     if (isPurelyNumeric(item.description)) {
       tableBody.push([
-        { content: '' },
+        { content: item.code ? deepSanitize(item.code) : '' },
         { content: deepSanitize(item.description), styles: { fontSize: 7.5 } },
         { content: item.quantity === 1 ? '1' : String(item.quantity || 0) },
         { content: item.unit_price !== 0 ? `${formatCurrency(item.unit_price)} EUR` : '' },
@@ -430,7 +445,7 @@ export async function generateInvoicePDF(
       ]);
     } else {
       tableBody.push([
-        { content: '' },
+        { content: item.code ? deepSanitize(item.code) : '' },
         descContent,
         { content: item.quantity === 1 ? '1' : (item.quantity || 0).toString() },
         { content: item.unit_price !== 0 ? `${formatCurrency(item.unit_price)} EUR` : '' },

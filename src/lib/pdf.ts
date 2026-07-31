@@ -37,7 +37,7 @@ export function generateInvoicePDF(invoice: Invoice): void {
     subtotal: isIT ? 'Subtotale' : 'Vmesna vsota',
     penaltiesTotal: isIT ? 'Totale sanzioni' : 'Skupaj kazni',
     total: isIT ? 'TOTALE' : 'SKUPAJ',
-    footer: isIT ? 'Generato da FleetInvoice' : 'Generirano z FleetInvoice',
+    footer: isIT ? 'Generato da Manutecnica' : 'Generirano z Manutecnica',
     taxId: isIT ? 'Cod. fiscale' : 'Davčna št.',
     phone: isIT ? 'Tel.' : 'Tel.',
     address: isIT ? 'Indirizzo' : 'Naslov',
@@ -63,7 +63,7 @@ export function generateInvoicePDF(invoice: Invoice): void {
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(22);
   doc.setFont('helvetica', 'bold');
-  doc.text('FleetInvoice', 14, 18);
+  doc.text('Manutecnica', 14, 18);
 
   // Tagline
   doc.setFontSize(8);
