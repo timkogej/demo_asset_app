@@ -18,7 +18,7 @@ import {
   getItalianMonth,
 } from '../lib/invoiceCalculations';
 import { generateInvoicePDF } from '../lib/pdfGenerator';
-import { VAT_EXCEPTION_TEXTS, findVatExceptionByFull } from '../lib/constants';
+import { VAT_EXCEPTION_TEXTS, VAT_EXCEPTION_CUSTOM_ID, findVatExceptionByFull } from '../lib/constants';
 import { resolveVariables, resolveUnitPrice } from '../lib/invoiceVariables';
 import ReminderConfirmModal, { REMINDER_LEVEL_NAMES, REMINDER_BUTTON_COLORS } from '../components/reminders/ReminderConfirmModal';
 import ReminderHistoryPopover from '../components/reminders/ReminderHistoryPopover';
@@ -117,6 +117,7 @@ interface ManualForm {
   isReverseCharge: boolean;
   vatOverride: boolean;
   vatExceptionId: string | null;
+  vatExceptionCustomText: string | null;
   viesStatus: 'idle' | 'checking' | 'valid' | 'invalid' | 'not_applicable';
   dueDate: string;
   notes: string;
@@ -136,6 +137,7 @@ const BLANK_FORM: ManualForm = {
   isReverseCharge: false,
   vatOverride: false,
   vatExceptionId: null,
+  vatExceptionCustomText: null,
   viesStatus: 'idle',
   dueDate: '',
   notes: '',
@@ -535,6 +537,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
   const [vatEditing, setVatEditing] = useState(false);
   const [vatDraftOverride, setVatDraftOverride] = useState(false);
   const [vatDraftExceptionId, setVatDraftExceptionId] = useState<string | null>(null);
+  const [vatDraftCustomText, setVatDraftCustomText] = useState('');
 
   // invoice number: peeked on open (no increment), reserved on save (increments counter)
   const [peekedInvoiceNum, setPeekedInvoiceNum] = useState('');
@@ -1182,7 +1185,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
     const clientVehicles = vehicles.filter((v) => v.client_id === clientId);
     setFilteredVehicles(clientVehicles);
     setClientError(false);
-    setForm((f) => ({ ...f, clientId, vehicleId: '', isReverseCharge: false, vatOverride: false, vatExceptionId: null, viesStatus: 'idle' }));
+    setForm((f) => ({ ...f, clientId, vehicleId: '', isReverseCharge: false, vatOverride: false, vatExceptionId: null, vatExceptionCustomText: null, viesStatus: 'idle' }));
     setVatEditing(false);
 
     // VIES check
@@ -1200,6 +1203,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
             // Reverse charge takes precedence over a manual 0% override.
             vatOverride: rc ? false : f.vatOverride,
             vatExceptionId: rc ? null : f.vatExceptionId,
+            vatExceptionCustomText: rc ? null : f.vatExceptionCustomText,
           }));
         } catch {
           setForm((f) => ({ ...f, viesStatus: 'invalid' }));
@@ -1255,7 +1259,9 @@ export default function Invoices({ t, language }: InvoicesProps) {
   // VAT-related columns to persist, accounting for a manual 0% override.
   function vatDbFields(settings: Settings | null) {
     const exceptionFull = form.vatOverride
-      ? (VAT_EXCEPTION_TEXTS.find((e) => e.id === form.vatExceptionId)?.full ?? null)
+      ? (form.vatExceptionId === VAT_EXCEPTION_CUSTOM_ID
+          ? (form.vatExceptionCustomText?.trim() || null)
+          : (VAT_EXCEPTION_TEXTS.find((e) => e.id === form.vatExceptionId)?.full ?? null))
       : null;
     return {
       subtotal: formTotals.subtotal,
@@ -1610,7 +1616,13 @@ export default function Invoices({ t, language }: InvoicesProps) {
         vehicleId: full.vehicle_id || '',
         isReverseCharge: full.is_reverse_charge,
         vatOverride: full.vat_override ?? false,
-        vatExceptionId: findVatExceptionByFull(full.vat_exception_text)?.id ?? null,
+        vatExceptionId: full.vat_override
+          ? (findVatExceptionByFull(full.vat_exception_text)?.id
+              ?? (full.vat_exception_text ? VAT_EXCEPTION_CUSTOM_ID : null))
+          : null,
+        vatExceptionCustomText: full.vat_override && !findVatExceptionByFull(full.vat_exception_text)
+          ? (full.vat_exception_text || null)
+          : null,
         viesStatus: 'idle',
         dueDate: full.due_date || '',
         notes: full.notes || '',
@@ -2695,12 +2707,20 @@ export default function Invoices({ t, language }: InvoicesProps) {
                           {/* Step C — confirm / cancel */}
                           <button
                             type="button"
-                            disabled={vatDraftOverride && !vatDraftExceptionId}
+                            disabled={
+                              vatDraftOverride &&
+                              (!vatDraftExceptionId ||
+                                (vatDraftExceptionId === VAT_EXCEPTION_CUSTOM_ID && !vatDraftCustomText.trim()))
+                            }
                             onClick={() => {
                               setForm((f) => ({
                                 ...f,
                                 vatOverride: vatDraftOverride,
                                 vatExceptionId: vatDraftOverride ? vatDraftExceptionId : null,
+                                vatExceptionCustomText:
+                                  vatDraftOverride && vatDraftExceptionId === VAT_EXCEPTION_CUSTOM_ID
+                                    ? vatDraftCustomText.trim()
+                                    : null,
                               }));
                               setVatEditing(false);
                             }}
@@ -2725,10 +2745,22 @@ export default function Invoices({ t, language }: InvoicesProps) {
                             onChange={(v) => setVatDraftExceptionId(v || null)}
                             compact
                             placeholder="— izberite stavek —"
-                            options={VAT_EXCEPTION_TEXTS.map((ex) => ({
-                              value: ex.id,
-                              label: ex.full,
-                            }))}
+                            options={[
+                              ...VAT_EXCEPTION_TEXTS.map((ex) => ({
+                                value: ex.id,
+                                label: ex.full,
+                              })),
+                              { value: VAT_EXCEPTION_CUSTOM_ID, label: '✏️ Vnesi lasten stavek...' },
+                            ]}
+                          />
+                        )}
+                        {vatDraftOverride && vatDraftExceptionId === VAT_EXCEPTION_CUSTOM_ID && (
+                          <textarea
+                            value={vatDraftCustomText}
+                            onChange={(e) => setVatDraftCustomText(e.target.value)}
+                            rows={2}
+                            placeholder="Vnesite besedilo izjeme DDV..."
+                            className="w-full px-3 py-1.5 text-xs border border-accent-muted rounded-10 bg-surface text-text-dark placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
                           />
                         )}
                       </div>
@@ -2751,6 +2783,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
                               onClick={() => {
                                 setVatDraftOverride(form.vatOverride);
                                 setVatDraftExceptionId(form.vatExceptionId);
+                                setVatDraftCustomText(form.vatExceptionCustomText ?? '');
                                 setVatEditing(true);
                               }}
                               className="p-1 rounded text-text-muted hover:bg-accent-soft"
@@ -2762,7 +2795,9 @@ export default function Invoices({ t, language }: InvoicesProps) {
                         </div>
                         {form.vatOverride && form.vatExceptionId && (
                           <span className="text-xs text-text-muted">
-                            {VAT_EXCEPTION_TEXTS.find((e) => e.id === form.vatExceptionId)?.short}
+                            {form.vatExceptionId === VAT_EXCEPTION_CUSTOM_ID
+                              ? 'Lasten stavek'
+                              : VAT_EXCEPTION_TEXTS.find((e) => e.id === form.vatExceptionId)?.short}
                           </span>
                         )}
                       </div>
