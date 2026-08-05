@@ -1891,7 +1891,7 @@ export default function Invoices({ t, language }: InvoicesProps) {
           onClick={() => setFilterType('all')}
           className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${filterType === 'all' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
         >
-          Tutti
+          {t('inv.filter_all')}
         </button>
         {INVOICE_TYPES.map((type) => (
           <button

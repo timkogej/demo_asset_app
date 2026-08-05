@@ -483,6 +483,7 @@ export const translations = {
       kpi_collected: 'INCASSATO ({year})',
       billing_month: 'Mese di fatturazione',
       billing_year: 'Anno fatturazione',
+      filter_all: 'Tutti',
     },
     pay: {
       title: 'Pagamenti',
@@ -1028,6 +1029,7 @@ export const translations = {
       kpi_collected: 'PREJETO ({year})',
       billing_month: 'Mesec obračuna',
       billing_year: 'Leto obračuna',
+      filter_all: 'Vse',
     },
     pay: {
       title: 'Plačila',
